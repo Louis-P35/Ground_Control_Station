@@ -1,0 +1,235 @@
+#include "MainWindow.h"
+#include <QGridLayout>
+#include <QWidget>
+#include <QStatusBar>
+#include <QApplication>
+#include "widgets/DroneWidget3D.h"
+#include "widgets/CompassWidget.h"
+#include "widgets/JoystickWidget.h"
+#include "widgets/Mtf01Widget.h"
+#include "widgets/GpsWidget.h"
+#include "widgets/MotorWidget.h"
+#include "widgets/PidConfigWidget.h"
+#include "widgets/GraphWidget.h"
+#include "widgets/TerminalWidget.h"
+
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    setWindowTitle("Ground Control Station");
+    setMinimumSize(1400, 900);
+
+    // Apply dark theme
+    qApp->setStyle("Fusion");
+    QPalette dark;
+    dark.setColor(QPalette::Window,          QColor(30, 30, 30));
+    dark.setColor(QPalette::WindowText,      Qt::white);
+    dark.setColor(QPalette::Base,            QColor(20, 20, 20));
+    dark.setColor(QPalette::AlternateBase,   QColor(40, 40, 40));
+    dark.setColor(QPalette::Text,            Qt::white);
+    dark.setColor(QPalette::Button,          QColor(50, 50, 50));
+    dark.setColor(QPalette::ButtonText,      Qt::white);
+    dark.setColor(QPalette::Highlight,       QColor(42, 130, 218));
+    dark.setColor(QPalette::HighlightedText, Qt::black);
+    qApp->setPalette(dark);
+
+    setupUi();
+    setupStatusBar();
+
+    // Network — lives on its own thread
+    m_netThread = new QThread(this);
+    m_udpLink   = new UdpLink(5005);
+    m_udpLink->moveToThread(m_netThread);
+    connect(m_netThread, &QThread::started, m_udpLink, &UdpLink::start);
+
+    m_cmdSender = new CommandSender(m_udpLink);
+    m_cmdSender->moveToThread(m_netThread);
+
+    connectSignals();
+
+    m_netThread->start();
+
+    m_statusTimer = new QTimer(this);
+    m_statusTimer->setInterval(500);
+    connect(m_statusTimer, &QTimer::timeout, this, &MainWindow::onStatusBarTick);
+    m_statusTimer->start();
+}
+
+MainWindow::~MainWindow() {
+    m_netThread->quit();
+    m_netThread->wait();
+    delete m_udpLink;
+    delete m_cmdSender;
+}
+
+// ---------------------------------------------------------------------------
+// UI layout — 3-column responsive grid
+// ---------------------------------------------------------------------------
+void MainWindow::setupUi() {
+    auto* central = new QWidget(this);
+    setCentralWidget(central);
+
+    auto* grid = new QGridLayout(central);
+    grid->setSpacing(6);
+    grid->setContentsMargins(6, 6, 6, 6);
+
+    m_drone3d  = new DroneWidget3D(this);
+    m_compass  = new CompassWidget(this);
+    m_joystick = new JoystickWidget(this);
+    m_mtf01    = new Mtf01Widget(this);
+    m_gps      = new GpsWidget(this);
+    m_motor    = new MotorWidget(this);
+    m_pid      = new PidConfigWidget(this);
+    m_graph    = new GraphWidget(this);
+    m_terminal = new TerminalWidget(this);
+
+    // Row 0: 3D view (large), compass, joystick
+    grid->addWidget(m_drone3d,  0, 0, 2, 1); // spans 2 rows
+    grid->addWidget(m_compass,  0, 1);
+    grid->addWidget(m_joystick, 0, 2);
+
+    // Row 1: MTF-01, GPS, motors
+    grid->addWidget(m_mtf01,   1, 1);
+    grid->addWidget(m_gps,     1, 2);
+    grid->addWidget(m_motor,   0, 3, 2, 1); // spans 2 rows
+
+    // Row 2: PID config (wide), graph
+    grid->addWidget(m_pid,     2, 0, 1, 2);
+    grid->addWidget(m_graph,   2, 2, 1, 2);
+
+    // Row 3: terminal (full width)
+    grid->addWidget(m_terminal, 3, 0, 1, 4);
+
+    // Column stretch
+    grid->setColumnStretch(0, 3);
+    grid->setColumnStretch(1, 2);
+    grid->setColumnStretch(2, 2);
+    grid->setColumnStretch(3, 2);
+
+    // Row stretch
+    grid->setRowStretch(0, 3);
+    grid->setRowStretch(1, 3);
+    grid->setRowStretch(2, 4);
+    grid->setRowStretch(3, 2);
+}
+
+void MainWindow::setupStatusBar() {
+    auto* sb = statusBar();
+    sb->setStyleSheet("QStatusBar { background: #1a1a1a; color: white; }");
+
+    m_statusConn    = new QLabel("  Disconnected  ", this);
+    m_statusLatency = new QLabel("  Latency: -- ms  ", this);
+    m_statusRssi    = new QLabel("  RSSI: --  ", this);
+    m_statusLoss    = new QLabel("  Loss: -- %  ", this);
+    m_statusPort    = new QLabel("  Port: 5005  ", this);
+    m_statusDroneIp = new QLabel("  Drone: --  ", this);
+
+    m_statusConn->setStyleSheet("color: #ff4444; font-weight: bold;");
+
+    sb->addWidget(m_statusConn);
+    sb->addWidget(m_statusLatency);
+    sb->addWidget(m_statusRssi);
+    sb->addWidget(m_statusLoss);
+    sb->addPermanentWidget(m_statusPort);
+    sb->addPermanentWidget(m_statusDroneIp);
+}
+
+void MainWindow::connectSignals() {
+    auto* parser = m_udpLink->parser();
+
+    // Qt::QueuedConnection because parser lives on network thread
+    connect(m_udpLink, &UdpLink::connectionStateChanged,
+            this,      &MainWindow::onConnectionChanged,    Qt::QueuedConnection);
+    connect(m_udpLink, &UdpLink::droneEndpointUpdated,
+            this,      &MainWindow::onDroneEndpointUpdated, Qt::QueuedConnection);
+    connect(parser, &PacketParser::attitudeReceived,
+            this,   &MainWindow::onAttitudeReceived,        Qt::QueuedConnection);
+    connect(parser, &PacketParser::gpsReceived,
+            this,   &MainWindow::onGpsReceived,             Qt::QueuedConnection);
+    connect(parser, &PacketParser::mtf01Received,
+            this,   &MainWindow::onMtf01Received,           Qt::QueuedConnection);
+    connect(parser, &PacketParser::radioReceived,
+            this,   &MainWindow::onRadioReceived,           Qt::QueuedConnection);
+    connect(parser, &PacketParser::statusReceived,
+            this,   &MainWindow::onStatusReceived,          Qt::QueuedConnection);
+    connect(parser, &PacketParser::pidReceived,
+            this,   &MainWindow::onPidReceived,             Qt::QueuedConnection);
+    connect(parser, &PacketParser::logReceived,
+            this,   &MainWindow::onLogReceived,             Qt::QueuedConnection);
+
+    // PID config widget → command sender
+    connect(m_pid, &PidConfigWidget::sendPidRequested,
+            this, [this](PidAxisId axis, float kp, float ki, float kd){
+        // Invoke on network thread
+        QMetaObject::invokeMethod(m_cmdSender, [this, axis, kp, ki, kd]{
+            m_cmdSender->sendSetPid(axis, kp, ki, kd);
+        }, Qt::QueuedConnection);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Slots
+// ---------------------------------------------------------------------------
+void MainWindow::onConnectionChanged(bool connected) {
+    if (connected) {
+        m_statusConn->setText("  Connected  ");
+        m_statusConn->setStyleSheet("color: #44ff44; font-weight: bold;");
+    } else {
+        m_statusConn->setText("  Disconnected  ");
+        m_statusConn->setStyleSheet("color: #ff4444; font-weight: bold;");
+    }
+}
+
+void MainWindow::onDroneEndpointUpdated(QString ip, quint16 /*port*/) {
+    m_statusDroneIp->setText(QString("  Drone: %1  ").arg(ip));
+}
+
+void MainWindow::onAttitudeReceived(AttitudeData d) {
+    m_state.updateAttitude(d);
+    m_drone3d->updateAttitude(d);
+    m_graph->pushAttitude(d);
+}
+
+void MainWindow::onGpsReceived(GpsData d) {
+    m_state.updateGps(d);
+    m_gps->updateData(d);
+    m_compass->setHeading(d.heading_deg);
+    m_graph->pushGps(d);
+}
+
+void MainWindow::onMtf01Received(Mtf01Data d) {
+    m_state.updateMtf01(d);
+    m_mtf01->updateData(d);
+    m_graph->pushMtf01(d);
+}
+
+void MainWindow::onRadioReceived(RadioData d) {
+    m_state.updateRadio(d);
+    m_joystick->updateData(d);
+}
+
+void MainWindow::onStatusReceived(StatusData d) {
+    m_state.updateStatus(d);
+    m_motor->updateData(d);
+    m_pid->updateStatus(d);
+    m_statusRssi->setText(QString("  RSSI: %1  ").arg(d.wifi_rssi));
+}
+
+void MainWindow::onPidReceived(PidData d) {
+    m_state.updatePid(d);
+    m_pid->updatePid(d);
+}
+
+void MainWindow::onLogReceived(uint8_t level, QString text) {
+    m_terminal->appendMessage(level, text);
+}
+
+void MainWindow::onStatusBarTick() {
+    int ageMs = m_udpLink->lastPacketAgeMs();
+    if (ageMs >= 0)
+        m_statusLatency->setText(QString("  Latency: %1 ms  ").arg(ageMs));
+    else
+        m_statusLatency->setText("  Latency: -- ms  ");
+
+    // Aggregate packet loss across attitude packets (highest rate = best indicator)
+    float loss = m_udpLink->parser()->packetLoss(PKT_ATTITUDE);
+    m_statusLoss->setText(QString("  Loss: %1 %  ").arg(loss, 0, 'f', 1));
+}

@@ -1,0 +1,191 @@
+#include "PacketParser.h"
+#include <cstring>
+#include <QtMath>
+
+PacketParser::PacketParser(QObject* parent) : QObject(parent) {}
+
+// ---------------------------------------------------------------------------
+// CRC-16/CCITT (polynomial 0x1021, init 0xFFFF)
+// ---------------------------------------------------------------------------
+uint16_t PacketParser::crc16(const uint8_t* data, int len) {
+    uint16_t crc = 0xFFFF;
+    for (int i = 0; i < len; ++i) {
+        crc ^= static_cast<uint16_t>(data[i]) << 8;
+        for (int b = 0; b < 8; ++b)
+            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
+    }
+    return crc;
+}
+
+// ---------------------------------------------------------------------------
+// parse — entry point, iterates over all packets in the datagram
+// ---------------------------------------------------------------------------
+void PacketParser::parse(const QByteArray& datagram) {
+    const auto* data = reinterpret_cast<const uint8_t*>(datagram.constData());
+    int         size = datagram.size();
+    int         offset = 0;
+
+    while (offset < size) {
+        if (!tryParseOne(data, size - offset, offset))
+            break; // Cannot recover — discard remainder
+    }
+}
+
+// ---------------------------------------------------------------------------
+// tryParseOne — attempts to parse one packet starting at data[offset]
+// Returns true if a packet (valid or not) was consumed; false on fatal error.
+// ---------------------------------------------------------------------------
+bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) {
+    // Need at least a full header
+    if (available < static_cast<int>(sizeof(PacketHeader))) return false;
+
+    const auto* hdr = reinterpret_cast<const PacketHeader*>(data + offset);
+
+    // Magic / version check
+    if (hdr->magic != PACKET_MAGIC || hdr->version != PACKET_VERSION) {
+        ++offset; // Advance one byte and try again
+        return true;
+    }
+
+    int totalSize = sizeof(PacketHeader) + hdr->payload_len + sizeof(uint16_t);
+    if (available < totalSize) return false; // Incomplete — wait for more data
+
+    // CRC covers header + payload
+    uint16_t computed = crc16(data + offset, sizeof(PacketHeader) + hdr->payload_len);
+    uint16_t received;
+    std::memcpy(&received, data + offset + sizeof(PacketHeader) + hdr->payload_len, sizeof(uint16_t));
+
+    if (computed != received) {
+        // Bad CRC: skip this packet
+        offset += totalSize;
+        return true;
+    }
+
+    // Track sequence numbers for types 0x01–0x07
+    if (hdr->type >= 0x01 && hdr->type <= 0x07)
+        trackSeq(hdr->type, hdr->seq);
+
+    // Dispatch by type
+    const uint8_t* pkt = data + offset;
+    switch (hdr->type) {
+        case PKT_ATTITUDE: {
+            if (totalSize < static_cast<int>(sizeof(PktAttitude))) break;
+            PktAttitude p; std::memcpy(&p, pkt, sizeof(p));
+            AttitudeData d;
+            d.qw = p.qw; d.qx = p.qx; d.qy = p.qy; d.qz = p.qz;
+            d.gx = p.gx; d.gy = p.gy; d.gz = p.gz;
+            d.ax = p.ax; d.ay = p.ay; d.az = p.az;
+            emit attitudeReceived(d);
+            break;
+        }
+        case PKT_GPS: {
+            if (totalSize < static_cast<int>(sizeof(PktGps))) break;
+            PktGps p; std::memcpy(&p, pkt, sizeof(p));
+            GpsData d;
+            d.latitude    = p.latitude;
+            d.longitude   = p.longitude;
+            d.altitude_m  = p.altitude_m;
+            d.speed_ms    = p.speed_ms;
+            d.heading_deg = p.heading_deg;
+            d.satellites  = p.satellites;
+            d.fix_type    = p.fix_type;
+            emit gpsReceived(d);
+            break;
+        }
+        case PKT_MTF01: {
+            if (totalSize < static_cast<int>(sizeof(PktMtf01))) break;
+            PktMtf01 p; std::memcpy(&p, pkt, sizeof(p));
+            Mtf01Data d;
+            d.distance_m = p.distance_m;
+            d.flow_x     = p.flow_x;
+            d.flow_y     = p.flow_y;
+            d.quality    = p.quality;
+            emit mtf01Received(d);
+            break;
+        }
+        case PKT_RADIO: {
+            if (totalSize < static_cast<int>(sizeof(PktRadio))) break;
+            PktRadio p; std::memcpy(&p, pkt, sizeof(p));
+            RadioData d;
+            std::memcpy(d.channels, p.channels, sizeof(d.channels));
+            d.rssi = p.rssi;
+            emit radioReceived(d);
+            break;
+        }
+        case PKT_STATUS: {
+            if (totalSize < static_cast<int>(sizeof(PktStatus))) break;
+            PktStatus p; std::memcpy(&p, pkt, sizeof(p));
+            StatusData d;
+            d.battery_voltage  = p.battery_voltage;
+            d.battery_current  = p.battery_current;
+            d.battery_percent  = p.battery_percent;
+            d.armed            = p.armed;
+            d.flight_mode      = p.flight_mode;
+            std::memcpy(d.motor_percent, p.motor_percent, 4);
+            d.wifi_rssi        = p.wifi_rssi;
+            emit statusReceived(d);
+            break;
+        }
+        case PKT_PID: {
+            if (totalSize < static_cast<int>(sizeof(PktPidValues))) break;
+            PktPidValues p; std::memcpy(&p, pkt, sizeof(p));
+            PidData d;
+            d.rate_roll      = p.rate_roll;
+            d.rate_pitch     = p.rate_pitch;
+            d.rate_yaw       = p.rate_yaw;
+            d.attitude_roll  = p.attitude_roll;
+            d.attitude_pitch = p.attitude_pitch;
+            d.attitude_yaw   = p.attitude_yaw;
+            d.position_x     = p.position_x;
+            d.position_y     = p.position_y;
+            d.position_z     = p.position_z;
+            emit pidReceived(d);
+            break;
+        }
+        case PKT_LOG: {
+            if (totalSize < static_cast<int>(sizeof(PktLog))) break;
+            PktLog p; std::memcpy(&p, pkt, sizeof(p));
+            p.text[127] = '\0'; // Ensure null-termination
+            emit logReceived(p.level, QString::fromUtf8(p.text));
+            break;
+        }
+        case PKT_ACK: {
+            if (totalSize < static_cast<int>(sizeof(PktAck))) break;
+            PktAck p; std::memcpy(&p, pkt, sizeof(p));
+            emit ackReceived(p.ack_type, p.ack_seq, p.success);
+            break;
+        }
+        default:
+            break;
+    }
+
+    offset += totalSize;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Sequence tracking
+// ---------------------------------------------------------------------------
+void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
+    if (type == 0 || type > 7) return;
+    auto& t = m_seqTracker[type];
+    if (t.first) {
+        t.lastSeq = seq;
+        t.first   = false;
+        t.received = 1;
+        t.expected = 1;
+        return;
+    }
+    uint16_t delta = static_cast<uint16_t>(seq - t.lastSeq);
+    t.expected += delta;
+    t.received += 1;
+    t.lastSeq   = seq;
+}
+
+float PacketParser::packetLoss(uint8_t type) const {
+    if (type == 0 || type > 7) return 0.0f;
+    const auto& t = m_seqTracker[type];
+    if (t.expected == 0) return 0.0f;
+    float loss = 1.0f - static_cast<float>(t.received) / static_cast<float>(t.expected);
+    return qBound(0.0f, loss * 100.0f, 100.0f);
+}
