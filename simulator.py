@@ -142,11 +142,11 @@ def simulate(sock, t: float):
         mode    = 1  # STABILIZE
         throttle_base = 40 + 10 * (0.5 + 0.5 * math.sin(t * 0.15))
         motors = [
-            int(throttle_base + 5 * math.sin(t * 0.7 + i)) for i in range(4)
+            int(throttle_base + 5 * math.sin(t * 0.7 + i)) for i in range(8)
         ]
         motors = [max(0, min(100, m)) for m in motors]
         wifi_rssi = int(75 + 20 * math.sin(t * 0.07))
-        payload = struct.pack("<ffBBB4BB",
+        payload = struct.pack("<ffBBB8BB",
             voltage, current, percent, armed, mode, *motors, wifi_rssi)
         sock.send(make_packet(0x05, payload, next_seq(0x05), ts))
 

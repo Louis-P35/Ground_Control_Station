@@ -42,7 +42,7 @@ struct StatusData {
     uint8_t battery_percent  = 0;
     uint8_t armed            = 0;
     uint8_t flight_mode      = 0;
-    uint8_t motor_percent[4] = {};
+    uint8_t motor_percent[8] = {};
     uint8_t wifi_rssi        = 0;
 };
 

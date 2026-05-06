@@ -121,7 +121,7 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             d.battery_percent  = p.battery_percent;
             d.armed            = p.armed;
             d.flight_mode      = p.flight_mode;
-            std::memcpy(d.motor_percent, p.motor_percent, 4);
+            std::memcpy(d.motor_percent, p.motor_percent, 8);
             d.wifi_rssi        = p.wifi_rssi;
             emit statusReceived(d);
             break;

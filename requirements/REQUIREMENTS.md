@@ -157,7 +157,7 @@ struct PktStatus {
     uint8_t battery_percent;  // 0–100
     uint8_t armed;            // 0=disarmed, 1=armed
     uint8_t flight_mode;      // See FlightMode enum
-    uint8_t motor_percent[4]; // Motor throttle 0–100 per motor
+    uint8_t motor_percent[8]; // Motor throttle 0–100 per motor (up to octocopter)
     uint8_t wifi_rssi;        // WiFi signal strength 0–100
     uint16_t crc;
 };
@@ -316,10 +316,16 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 #### W6 — Motor Gauges (`MotorWidget`)
 
-- 4 vertical gauge bars labeled M1, M2, M3, M4
+- **8 vertical gauge bars** labeled M1–M8, sized to fit in an **X layout**:
+  - Top-left pair : M1, M2 (side by side)
+  - Top-right pair : M3, M4 (side by side)
+  - Bottom-left pair : M5, M6 (side by side)
+  - Bottom-right pair : M7, M8 (side by side)
+- A transparent center zone separates the four pairs, forming the X shape
 - Each bar fills proportionally to `motor_percent[i]` (0–100%)
 - Color: green at low throttle, yellow at mid, red near max
 - Shows numeric percentage below each gauge
+- Compatible with both quadcopter (M5–M8 at 0) and octocopter configurations
 
 ---
 

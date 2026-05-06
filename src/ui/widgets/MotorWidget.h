@@ -17,5 +17,5 @@ protected:
     void paintEvent(QPaintEvent*) override;
 
 private:
-    uint8_t m_motors[4] = {};
+    uint8_t m_motors[8] = {};
 };

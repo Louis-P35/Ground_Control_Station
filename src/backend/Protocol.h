@@ -88,7 +88,7 @@ struct PktStatus {
     uint8_t battery_percent;  // 0–100
     uint8_t armed;            // 0=disarmed, 1=armed
     uint8_t flight_mode;      // FlightMode enum
-    uint8_t motor_percent[4]; // Motor throttle 0–100 per motor
+    uint8_t motor_percent[8]; // Motor throttle 0–100 per motor (up to octocopter)
     uint8_t wifi_rssi;        // WiFi signal strength 0–100
     uint16_t crc;
 };
