@@ -360,18 +360,19 @@ Read-only status panel displaying drone health information:
 - Displays up to **8 simultaneous curves** in real-time
 - Each curve has a **distinct color**
 - Each curve can be **toggled on/off** via a labeled checkbox
-- X-axis: rolling time window (e.g. last 10 seconds), configurable
-- Y-axis: auto-scale or fixed range
-- The 8 data sources are configurable (mapped to any numeric field from the telemetry state)
-- Suggested default mapping:
-  1. Roll (°)
-  2. Pitch (°)
-  3. Yaw (°)
-  4. Altitude (m)
-  5. Gyro X
-  6. Gyro Y
-  7. Gyro Z
-  8. Flow quality
+- X-axis: rolling time window (last 10 seconds). Y-axis: auto-scale
+- Default data mapping:
+  1. Roll (°), 2. Pitch (°), 3. Yaw (°), 4. Altitude (m),
+  5. Gyro X (°/s), 6. Gyro Y (°/s), 7. Gyro Z (°/s), 8. Flow quality
+
+**Toolbar buttons (Graph tab only):**
+
+- **Export CSV** — exports the full session history (all samples since launch) to a `.csv` file via a file dialog.
+  - Comment lines (`#`) at the top of the file contain all 9 PID axis values (Rate/Attitude/Position, Kp/Ki/Kd each) at the time of export.
+  - Data columns: `timestamp_s, roll_deg, pitch_deg, yaw_deg, alt_m, gyr_x_dps, gyr_y_dps, gyr_z_dps, flow_quality`
+  - Default filename: `telemetry_YYYYMMDD_HHmmss.csv`
+- **Screenshot** — renders the graph widget to a `.png` file via a file dialog.
+  - Default filename: `graph_YYYYMMDD_HHmmss.png`
 
 ---
 
