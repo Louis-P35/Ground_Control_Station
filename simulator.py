@@ -138,16 +138,19 @@ def simulate(sock, t: float):
         voltage = 12.4 - 0.002 * t
         current = 8.5  + 2.0 * abs(math.sin(t * 0.3))
         percent = max(0, int(100 - t * 0.05))
-        armed   = 1
-        mode    = 1  # STABILIZE
+        # Cycle through FSM states over time
+        fsm_states = ["IDLE", "ARMED", "FLYING", "STABILIZE", "ALTHOLD", "LANDING"]
+        state_str  = fsm_states[int(t / 8) % len(fsm_states)]
+        state_raw  = state_str.encode("utf-8")[:31].ljust(32, b"\x00")
+
         throttle_base = 40 + 10 * (0.5 + 0.5 * math.sin(t * 0.15))
         motors = [
             int(throttle_base + 5 * math.sin(t * 0.7 + i)) for i in range(8)
         ]
         motors = [max(0, min(100, m)) for m in motors]
         wifi_rssi = int(75 + 20 * math.sin(t * 0.07))
-        payload = struct.pack("<ffBBB8BB",
-            voltage, current, percent, armed, mode, *motors, wifi_rssi)
+        payload = struct.pack("<ffB32s8BB",
+            voltage, current, percent, state_raw, *motors, wifi_rssi)
         sock.send(make_packet(0x05, payload, next_seq(0x05), ts))
 
     # ── 0x06 PID values (1 Hz) ───────────────────────────────────────

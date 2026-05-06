@@ -35,11 +35,10 @@ private:
     std::array<AxisRow, 9> m_axes;
 
     // Status
-    QLabel* m_voltage  = nullptr;
-    QLabel* m_current  = nullptr;
-    QLabel* m_batt     = nullptr;
-    QLabel* m_armed    = nullptr;
-    QLabel* m_mode     = nullptr;
+    QLabel* m_voltage = nullptr;
+    QLabel* m_current = nullptr;
+    QLabel* m_batt    = nullptr;
+    QLabel* m_state   = nullptr; // FSM state string from drone
 
     void addGroupSection(QGridLayout* grid, const QString& title,
                          int startAxis, int startRow,

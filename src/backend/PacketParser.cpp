@@ -116,13 +116,13 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             if (totalSize < static_cast<int>(sizeof(PktStatus))) break;
             PktStatus p; std::memcpy(&p, pkt, sizeof(p));
             StatusData d;
-            d.battery_voltage  = p.battery_voltage;
-            d.battery_current  = p.battery_current;
-            d.battery_percent  = p.battery_percent;
-            d.armed            = p.armed;
-            d.flight_mode      = p.flight_mode;
+            d.battery_voltage = p.battery_voltage;
+            d.battery_current = p.battery_current;
+            d.battery_percent = p.battery_percent;
+            p.state[31] = '\0'; // Ensure null-termination
+            d.state = p.state;
             std::memcpy(d.motor_percent, p.motor_percent, 8);
-            d.wifi_rssi        = p.wifi_rssi;
+            d.wifi_rssi = p.wifi_rssi;
             emit statusReceived(d);
             break;
         }

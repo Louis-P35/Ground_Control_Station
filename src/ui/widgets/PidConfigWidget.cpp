@@ -67,17 +67,19 @@ PidConfigWidget::PidConfigWidget(QWidget* parent) : QWidget(parent) {
         return l;
     };
 
-    m_voltage = mkVal(); m_current = mkVal();
-    m_batt    = mkVal(); m_mode    = mkVal();
-    m_armed   = new QLabel("DISARMED");
-    m_armed->setStyleSheet("color: #ff4444; font-weight: bold; font-size: 14px;");
-    m_armed->setAlignment(Qt::AlignCenter);
+    m_voltage = mkVal();
+    m_current = mkVal();
+    m_batt    = mkVal();
 
-    sf->addRow(mkLbl("Voltage:"),  m_voltage);
-    sf->addRow(mkLbl("Current:"),  m_current);
-    sf->addRow(mkLbl("Battery:"),  m_batt);
-    sf->addRow(mkLbl("Mode:"),     m_mode);
-    sf->addRow(m_armed);
+    // FSM state — large centered label, color changes with state
+    m_state = new QLabel("--");
+    m_state->setStyleSheet("color: #aaaaaa; font-weight: bold; font-size: 15px;");
+    m_state->setAlignment(Qt::AlignCenter);
+
+    sf->addRow(mkLbl("Voltage:"), m_voltage);
+    sf->addRow(mkLbl("Current:"), m_current);
+    sf->addRow(mkLbl("Battery:"), m_batt);
+    sf->addRow(mkLbl("State:"),   m_state);
 
     mainLayout->addWidget(statusBox, 1);
 }
@@ -153,15 +155,18 @@ void PidConfigWidget::updateStatus(const StatusData& d) {
     m_current->setText(QString("%1 A").arg(d.battery_current, 0, 'f', 2));
     m_batt   ->setText(QString("%1 %").arg(d.battery_percent));
 
-    static const char* modeNames[] = { "MANUAL", "STABILIZE", "ALTHOLD", "POSHOLD" };
-    uint8_t fm = qMin<uint8_t>(d.flight_mode, 3);
-    m_mode->setText(modeNames[fm]);
+    QString state = QString::fromStdString(d.state);
+    m_state->setText(state.isEmpty() ? "--" : state);
 
-    if (d.armed) {
-        m_armed->setText("ARMED");
-        m_armed->setStyleSheet("color: #44ff44; font-weight: bold; font-size: 14px;");
-    } else {
-        m_armed->setText("DISARMED");
-        m_armed->setStyleSheet("color: #ff4444; font-weight: bold; font-size: 14px;");
-    }
+    // Color hint: red for states that include "DISARM" or "ERROR", green for "ARM"/"FLY", gray otherwise
+    QString upper = state.toUpper();
+    QString color;
+    if (upper.contains("ERROR") || upper.contains("FAULT") || upper.contains("DISARM"))
+        color = "#ff4444";
+    else if (upper.contains("ARM") || upper.contains("FLY") || upper.contains("LAND"))
+        color = "#44ff44";
+    else
+        color = "#ffcc44";
+
+    m_state->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 15px;").arg(color));
 }
