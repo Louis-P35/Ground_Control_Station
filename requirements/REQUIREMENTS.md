@@ -53,6 +53,7 @@ gcs/
 │       │   ├── Mtf01Widget.h / .cpp
 │       │   ├── GpsWidget.h / .cpp
 │       │   ├── MotorWidget.h / .cpp
+│       │   ├── StatusWidget.h / .cpp
 │       │   ├── PidConfigWidget.h / .cpp
 │       │   ├── GraphWidget.h / .cpp
 │       │   └── TerminalWidget.h / .cpp
@@ -153,7 +154,6 @@ struct PktRadio {
 struct PktStatus {
     PacketHeader header;
     float   battery_voltage;  // Volts
-    float   battery_current;  // Amps
     uint8_t battery_percent;  // 0–100
     char    state[32];        // Null-terminated FSM state string (e.g. "IDLE", "ARMED", "FLYING")
     uint8_t motor_percent[8]; // Motor throttle 0–100 per motor (up to octocopter)
@@ -248,10 +248,20 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ### 5.1 General Layout
 
-- **Single window, no tabs, no menu bar**
-- All widgets arranged in a responsive grid layout
+- **Single window with two tabs, no menu bar**
 - Dark theme (dark background, light text)
 - Each widget has a visible title/label
+
+**Tab 0 — Dashboard**: all monitoring widgets arranged in a 4-column grid:
+
+```
+Col:   0 (3D/status)   1 (compass/mtf01)   2 (joystick/gps)   3 (motors)
+Row 0: [3D view      ] [compass           ] [joystick         ] [motors   ]
+Row 1: [status       ] [MTF-01            ] [GPS              ] [motors   ]
+Row 2: [terminal          x2              ] [PID config            x2     ]
+```
+
+**Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
 
 ### 5.2 Widget List
 
@@ -321,9 +331,7 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ---
 
-#### W7 — PID Configuration & Info (`PidConfigWidget`)
-
-**Editable fields (send to drone):**
+#### W7 — PID Configuration (`PidConfigWidget`)
 
 Three PID groups: **Rate**, **Attitude**, **Position**
 Each group has Roll, Pitch, Yaw (or X, Y, Z for position) axes.
@@ -332,18 +340,22 @@ Each axis has **Kp, Ki, Kd** editable float fields.
 A **"Send"** button per group sends the updated values to the drone via `PktSetPid`.
 PID values displayed in the fields are updated automatically when `PktPidValues` is received from the drone.
 
-**Read-only info fields:**
+---
+
+#### W8 — Status (`StatusWidget`)
+
+Read-only status panel displaying drone health information:
 - Battery voltage (V)
 - Battery level (%)
 - Drone uptime (HH:MM:SS, derived from packet header `timestamp_us`)
 - FSM state string received from the drone, displayed as a large color-coded label:
-  - RED — state contains "DISARM" or "ERROR" or "FAULT"
+  - RED — state contains "DISARM", "ERROR", or "FAULT"
   - GREEN — state contains "ARM", "FLY", or "LAND"
   - AMBER — any other state
 
 ---
 
-#### W8 — Real-Time Graph (`GraphWidget`)
+#### W9 — Real-Time Graph (`GraphWidget`)
 
 - Displays up to **8 simultaneous curves** in real-time
 - Each curve has a **distinct color**
@@ -363,7 +375,7 @@ PID values displayed in the fields are updated automatically when `PktPidValues`
 
 ---
 
-#### W9 — Terminal (`TerminalWidget`)
+#### W10 — Terminal (`TerminalWidget`)
 
 - Scrollable text area displaying log messages received via `PktLog`
 - Each message prefixed with timestamp and log level
