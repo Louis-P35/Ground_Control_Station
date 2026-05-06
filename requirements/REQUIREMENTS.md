@@ -96,7 +96,7 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x02` | GPS | 10 Hz |
 | `0x03` | MTF-01 (optical flow + laser) | 50 Hz |
 | `0x04` | Radio receiver | 50 Hz |
-| `0x05` | Status (battery, arm state, motors) | 10 Hz |
+| `0x05` | Status (battery, FSM state, motors) | 10 Hz |
 | `0x06` | PID values | Streamed |
 | `0x07` | Log / terminal text | On event |
 
@@ -155,18 +155,10 @@ struct PktStatus {
     float   battery_voltage;  // Volts
     float   battery_current;  // Amps
     uint8_t battery_percent;  // 0–100
-    uint8_t armed;            // 0=disarmed, 1=armed
-    uint8_t flight_mode;      // See FlightMode enum
+    char    state[32];        // Null-terminated FSM state string (e.g. "IDLE", "ARMED", "FLYING")
     uint8_t motor_percent[8]; // Motor throttle 0–100 per motor (up to octocopter)
     uint8_t wifi_rssi;        // WiFi signal strength 0–100
     uint16_t crc;
-};
-
-enum FlightMode : uint8_t {
-    MANUAL    = 0x00,
-    STABILIZE = 0x01,
-    ALTHOLD   = 0x02,
-    POSHOLD   = 0x03,
 };
 ```
 
@@ -344,8 +336,10 @@ PID values displayed in the fields are updated automatically when `PktPidValues`
 - Battery voltage (V)
 - Battery current (A)
 - Battery level (%)
-- Armed state (large colored indicator: RED=Disarmed / GREEN=Armed)
-- Flight mode
+- FSM state string received from the drone, displayed as a large color-coded label:
+  - RED — state contains "DISARM" or "ERROR" or "FAULT"
+  - GREEN — state contains "ARM", "FLY", or "LAND"
+  - AMBER — any other state
 
 ---
 
