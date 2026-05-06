@@ -117,8 +117,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             PktStatus p; std::memcpy(&p, pkt, sizeof(p));
             StatusData d;
             d.battery_voltage = p.battery_voltage;
-            d.battery_current = p.battery_current;
             d.battery_percent = p.battery_percent;
+            d.uptime_us       = p.header.timestamp_us;
             p.state[31] = '\0'; // Ensure null-termination
             d.state = p.state;
             std::memcpy(d.motor_percent, p.motor_percent, 8);

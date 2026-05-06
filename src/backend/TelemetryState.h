@@ -39,11 +39,11 @@ struct RadioData {
 
 struct StatusData {
     float       battery_voltage  = 0;
-    float       battery_current  = 0;
     uint8_t     battery_percent  = 0;
     std::string state;            // FSM state string received from drone
     uint8_t     motor_percent[8] = {};
     uint8_t     wifi_rssi        = 0;
+    uint32_t    uptime_us        = 0; // Drone uptime from packet header timestamp
 };
 
 struct PidData {

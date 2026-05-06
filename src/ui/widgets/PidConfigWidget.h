@@ -36,8 +36,8 @@ private:
 
     // Status
     QLabel* m_voltage = nullptr;
-    QLabel* m_current = nullptr;
     QLabel* m_batt    = nullptr;
+    QLabel* m_uptime  = nullptr;
     QLabel* m_state   = nullptr; // FSM state string from drone
 
     void addGroupSection(QGridLayout* grid, const QString& title,

@@ -334,8 +334,8 @@ PID values displayed in the fields are updated automatically when `PktPidValues`
 
 **Read-only info fields:**
 - Battery voltage (V)
-- Battery current (A)
 - Battery level (%)
+- Drone uptime (HH:MM:SS, derived from packet header `timestamp_us`)
 - FSM state string received from the drone, displayed as a large color-coded label:
   - RED — state contains "DISARM" or "ERROR" or "FAULT"
   - GREEN — state contains "ARM", "FLY", or "LAND"

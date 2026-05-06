@@ -68,8 +68,8 @@ PidConfigWidget::PidConfigWidget(QWidget* parent) : QWidget(parent) {
     };
 
     m_voltage = mkVal();
-    m_current = mkVal();
     m_batt    = mkVal();
+    m_uptime  = mkVal();
 
     // FSM state — large centered label, color changes with state
     m_state = new QLabel("--");
@@ -77,8 +77,8 @@ PidConfigWidget::PidConfigWidget(QWidget* parent) : QWidget(parent) {
     m_state->setAlignment(Qt::AlignCenter);
 
     sf->addRow(mkLbl("Voltage:"), m_voltage);
-    sf->addRow(mkLbl("Current:"), m_current);
     sf->addRow(mkLbl("Battery:"), m_batt);
+    sf->addRow(mkLbl("Uptime:"),  m_uptime);
     sf->addRow(mkLbl("State:"),   m_state);
 
     mainLayout->addWidget(statusBox, 1);
@@ -152,8 +152,17 @@ void PidConfigWidget::updatePid(const PidData& d) {
 
 void PidConfigWidget::updateStatus(const StatusData& d) {
     m_voltage->setText(QString("%1 V").arg(d.battery_voltage, 0, 'f', 2));
-    m_current->setText(QString("%1 A").arg(d.battery_current, 0, 'f', 2));
     m_batt   ->setText(QString("%1 %").arg(d.battery_percent));
+
+    // Format uptime from microseconds to HH:MM:SS
+    uint32_t totalSec = d.uptime_us / 1'000'000u;
+    uint32_t h = totalSec / 3600;
+    uint32_t m = (totalSec % 3600) / 60;
+    uint32_t s = totalSec % 60;
+    m_uptime->setText(QString("%1:%2:%3")
+        .arg(h, 2, 10, QChar('0'))
+        .arg(m, 2, 10, QChar('0'))
+        .arg(s, 2, 10, QChar('0')));
 
     QString state = QString::fromStdString(d.state);
     m_state->setText(state.isEmpty() ? "--" : state);
