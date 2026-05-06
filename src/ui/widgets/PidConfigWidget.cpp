@@ -37,9 +37,11 @@ PidConfigWidget::PidConfigWidget(QWidget* parent) : QWidget(parent) {
     pidGrid->addWidget(header("Ki"),   0, 2);
     pidGrid->addWidget(header("Kd"),   0, 3);
 
+    // Each section uses 5 rows: title + 3 axes + send button.
+    // Row 0: column headers. Sections start at rows 1, 6, 11.
     addGroupSection(pidGrid, "Rate",     0, 1,  {"Roll","Pitch","Yaw"}, "Send Rate", RATE_ROLL);
-    addGroupSection(pidGrid, "Attitude", 3, 5,  {"Roll","Pitch","Yaw"}, "Send Att.", ATT_ROLL);
-    addGroupSection(pidGrid, "Position", 6, 9,  {"X","Y","Z"},          "Send Pos.", POS_X);
+    addGroupSection(pidGrid, "Attitude", 3, 6,  {"Roll","Pitch","Yaw"}, "Send Att.", ATT_ROLL);
+    addGroupSection(pidGrid, "Position", 6, 11, {"X","Y","Z"},          "Send Pos.", POS_X);
 
     outer->addWidget(box);
 }
