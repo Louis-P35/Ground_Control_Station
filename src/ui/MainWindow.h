@@ -3,6 +3,7 @@
 #include <QThread>
 #include <QLabel>
 #include <QTimer>
+#include <QTabWidget>
 #include "backend/UdpLink.h"
 #include "backend/TelemetryState.h"
 #include "backend/CommandSender.h"
@@ -13,6 +14,7 @@ class JoystickWidget;
 class Mtf01Widget;
 class GpsWidget;
 class MotorWidget;
+class StatusWidget;
 class PidConfigWidget;
 class GraphWidget;
 class TerminalWidget;
@@ -46,21 +48,25 @@ private:
     void connectSignals();
 
     // Network
-    QThread*       m_netThread  = nullptr;
-    UdpLink*       m_udpLink    = nullptr;
+    QThread*       m_netThread = nullptr;
+    UdpLink*       m_udpLink   = nullptr;
     TelemetryState m_state;
-    CommandSender* m_cmdSender  = nullptr;
+    CommandSender* m_cmdSender = nullptr;
+
+    // Tab container
+    QTabWidget*      m_tabs     = nullptr;
 
     // Widgets
-    DroneWidget3D*   m_drone3d    = nullptr;
-    CompassWidget*   m_compass    = nullptr;
-    JoystickWidget*  m_joystick   = nullptr;
-    Mtf01Widget*     m_mtf01      = nullptr;
-    GpsWidget*       m_gps        = nullptr;
-    MotorWidget*     m_motor      = nullptr;
-    PidConfigWidget* m_pid        = nullptr;
-    GraphWidget*     m_graph      = nullptr;
-    TerminalWidget*  m_terminal   = nullptr;
+    DroneWidget3D*   m_drone3d  = nullptr;
+    CompassWidget*   m_compass  = nullptr;
+    JoystickWidget*  m_joystick = nullptr;
+    Mtf01Widget*     m_mtf01    = nullptr;
+    GpsWidget*       m_gps      = nullptr;
+    MotorWidget*     m_motor    = nullptr;
+    StatusWidget*    m_status   = nullptr;
+    PidConfigWidget* m_pid      = nullptr;
+    GraphWidget*     m_graph    = nullptr;
+    TerminalWidget*  m_terminal = nullptr;
 
     // Status bar labels
     QLabel* m_statusConn    = nullptr;

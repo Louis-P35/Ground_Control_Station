@@ -25,6 +25,7 @@ set(SOURCES
     src/ui/widgets/Mtf01Widget.cpp
     src/ui/widgets/GpsWidget.cpp
     src/ui/widgets/MotorWidget.cpp
+    src/ui/widgets/StatusWidget.cpp
     src/ui/widgets/PidConfigWidget.cpp
     src/ui/widgets/GraphWidget.cpp
     src/ui/widgets/TerminalWidget.cpp
@@ -43,6 +44,7 @@ set(HEADERS
     src/ui/widgets/Mtf01Widget.h
     src/ui/widgets/GpsWidget.h
     src/ui/widgets/MotorWidget.h
+    src/ui/widgets/StatusWidget.h
     src/ui/widgets/PidConfigWidget.h
     src/ui/widgets/GraphWidget.h
     src/ui/widgets/TerminalWidget.h

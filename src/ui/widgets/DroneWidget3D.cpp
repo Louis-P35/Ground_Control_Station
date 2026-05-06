@@ -59,9 +59,8 @@ void DroneWidget3D::paintGL() {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    // Fixed camera slightly above and in front
-    // gluLookAt equivalent: eye=(0,2,4), center=(0,0,0), up=(0,1,0)
-    float eyeX = 0, eyeY = 2, eyeZ = 4;
+    // Fixed camera — closer than before so the drone fills the widget better
+    float eyeX = 0, eyeY = 1.2f, eyeZ = 2.4f;
     float cenX = 0, cenY = 0, cenZ = 0;
     float upX  = 0, upY  = 1, upZ  = 0;
     float fx = cenX-eyeX, fy = cenY-eyeY, fz = cenZ-eyeZ;

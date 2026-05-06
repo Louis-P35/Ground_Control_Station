@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include <QGridLayout>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <QStatusBar>
 #include <QApplication>
@@ -9,6 +10,7 @@
 #include "widgets/Mtf01Widget.h"
 #include "widgets/GpsWidget.h"
 #include "widgets/MotorWidget.h"
+#include "widgets/StatusWidget.h"
 #include "widgets/PidConfigWidget.h"
 #include "widgets/GraphWidget.h"
 #include "widgets/TerminalWidget.h"
@@ -61,54 +63,72 @@ MainWindow::~MainWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// UI layout — 3-column responsive grid
+// UI layout — two tabs:
+//
+//  Tab 0 "Dashboard":
+//    Col:   0 (3D/status)   1 (compass/mtf01)   2 (joystick/gps)   3 (motors)
+//    Row 0: [3D view      ] [compass           ] [joystick         ] [motors   ]
+//    Row 1: [status       ] [MTF-01            ] [GPS              ] [motors   ]
+//    Row 2: [terminal          x2              ] [PID config            x2     ]
+//
+//  Tab 1 "Graph":
+//    Full-window graph widget
 // ---------------------------------------------------------------------------
 void MainWindow::setupUi() {
-    auto* central = new QWidget(this);
-    setCentralWidget(central);
-
-    auto* grid = new QGridLayout(central);
-    grid->setSpacing(6);
-    grid->setContentsMargins(6, 6, 6, 6);
-
     m_drone3d  = new DroneWidget3D(this);
     m_compass  = new CompassWidget(this);
     m_joystick = new JoystickWidget(this);
     m_mtf01    = new Mtf01Widget(this);
     m_gps      = new GpsWidget(this);
     m_motor    = new MotorWidget(this);
+    m_status   = new StatusWidget(this);
     m_pid      = new PidConfigWidget(this);
     m_graph    = new GraphWidget(this);
     m_terminal = new TerminalWidget(this);
 
-    // Row 0: 3D view (large), compass, joystick
-    grid->addWidget(m_drone3d,  0, 0, 2, 1); // spans 2 rows
+    // --- Tab 0: Dashboard ---
+    auto* dashTab = new QWidget(this);
+    auto* grid = new QGridLayout(dashTab);
+    grid->setSpacing(6);
+    grid->setContentsMargins(6, 6, 6, 6);
+
+    // Row 0: 3D, compass, joystick, motors (spans rows 0-1)
+    grid->addWidget(m_drone3d,  0, 0);
     grid->addWidget(m_compass,  0, 1);
     grid->addWidget(m_joystick, 0, 2);
+    grid->addWidget(m_motor,    0, 3, 2, 1);
 
-    // Row 1: MTF-01, GPS, motors
-    grid->addWidget(m_mtf01,   1, 1);
-    grid->addWidget(m_gps,     1, 2);
-    grid->addWidget(m_motor,   0, 3, 2, 1); // spans 2 rows
+    // Row 1: status, MTF-01, GPS
+    grid->addWidget(m_status, 1, 0);
+    grid->addWidget(m_mtf01,  1, 1);
+    grid->addWidget(m_gps,    1, 2);
 
-    // Row 2: PID config (wide), graph
-    grid->addWidget(m_pid,     2, 0, 1, 2);
-    grid->addWidget(m_graph,   2, 2, 1, 2);
+    // Row 2: terminal (left half), PID config (right half)
+    grid->addWidget(m_terminal, 2, 0, 1, 2);
+    grid->addWidget(m_pid,      2, 2, 1, 2);
 
-    // Row 3: terminal (full width)
-    grid->addWidget(m_terminal, 3, 0, 1, 4);
-
-    // Column stretch
-    grid->setColumnStretch(0, 3);
+    grid->setColumnStretch(0, 2);
     grid->setColumnStretch(1, 2);
     grid->setColumnStretch(2, 2);
     grid->setColumnStretch(3, 2);
 
-    // Row stretch
     grid->setRowStretch(0, 3);
-    grid->setRowStretch(1, 3);
+    grid->setRowStretch(1, 2);
     grid->setRowStretch(2, 4);
-    grid->setRowStretch(3, 2);
+
+    // --- Tab 1: Graph ---
+    auto* graphTab = new QWidget(this);
+    auto* graphLayout = new QVBoxLayout(graphTab);
+    graphLayout->setContentsMargins(6, 6, 6, 6);
+    graphLayout->addWidget(m_graph);
+
+    // --- Tab widget ---
+    m_tabs = new QTabWidget(this);
+    m_tabs->setDocumentMode(false);
+    m_tabs->addTab(dashTab,  "Dashboard");
+    m_tabs->addTab(graphTab, "Graph");
+
+    setCentralWidget(m_tabs);
 }
 
 void MainWindow::setupStatusBar() {
@@ -155,11 +175,10 @@ void MainWindow::connectSignals() {
     connect(parser, &PacketParser::logReceived,
             this,   &MainWindow::onLogReceived,             Qt::QueuedConnection);
 
-    // PID config widget → command sender
+    // PID config widget → command sender (invoked on network thread)
     connect(m_pid, &PidConfigWidget::sendPidRequested,
-            this, [this](PidAxisId axis, float kp, float ki, float kd){
-        // Invoke on network thread
-        QMetaObject::invokeMethod(m_cmdSender, [this, axis, kp, ki, kd]{
+            this, [this](PidAxisId axis, float kp, float ki, float kd) {
+        QMetaObject::invokeMethod(m_cmdSender, [this, axis, kp, ki, kd] {
             m_cmdSender->sendSetPid(axis, kp, ki, kd);
         }, Qt::QueuedConnection);
     });
@@ -209,7 +228,7 @@ void MainWindow::onRadioReceived(RadioData d) {
 void MainWindow::onStatusReceived(StatusData d) {
     m_state.updateStatus(d);
     m_motor->updateData(d);
-    m_pid->updateStatus(d);
+    m_status->updateData(d);
     m_statusRssi->setText(QString("  RSSI: %1  ").arg(d.wifi_rssi));
 }
 
@@ -229,7 +248,6 @@ void MainWindow::onStatusBarTick() {
     else
         m_statusLatency->setText("  Latency: -- ms  ");
 
-    // Aggregate packet loss across attitude packets (highest rate = best indicator)
     float loss = m_udpLink->parser()->packetLoss(PKT_ATTITUDE);
     m_statusLoss->setText(QString("  Loss: %1 %  ").arg(loss, 0, 'f', 1));
 }
