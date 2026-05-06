@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include <QGridLayout>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
 #include <QWidget>
 #include <QStatusBar>
 #include <QApplication>
@@ -10,6 +12,7 @@
 #include "widgets/Mtf01Widget.h"
 #include "widgets/GpsWidget.h"
 #include "widgets/MotorWidget.h"
+#include "widgets/StatusWidget.h"
 #include "widgets/StatusWidget.h"
 #include "widgets/PidConfigWidget.h"
 #include "widgets/GraphWidget.h"
@@ -120,7 +123,30 @@ void MainWindow::setupUi() {
     auto* graphTab = new QWidget(this);
     auto* graphLayout = new QVBoxLayout(graphTab);
     graphLayout->setContentsMargins(6, 6, 6, 6);
+    graphLayout->setSpacing(4);
+
+    // Toolbar with export actions
+    auto* btnBar   = new QHBoxLayout();
+    auto* csvBtn   = new QPushButton("Export CSV",  graphTab);
+    auto* ssBtn    = new QPushButton("Screenshot",  graphTab);
+    QString btnStyle = "QPushButton { background: #1a4a8a; color: white; border: 1px solid #2a6ac0; "
+                       "padding: 4px 12px; font-size: 12px; border-radius: 3px; }"
+                       "QPushButton:hover { background: #2a6ac0; }";
+    csvBtn->setStyleSheet(btnStyle);
+    ssBtn ->setStyleSheet(btnStyle);
+    csvBtn->setFixedHeight(28);
+    ssBtn ->setFixedHeight(28);
+    btnBar->addWidget(csvBtn);
+    btnBar->addWidget(ssBtn);
+    btnBar->addStretch(1);
+    graphLayout->addLayout(btnBar);
     graphLayout->addWidget(m_graph);
+
+    // Export CSV: pass current PID state to the graph so it can write the header
+    connect(csvBtn, &QPushButton::clicked, this, [this]() {
+        m_graph->exportCsv(m_state.pid());
+    });
+    connect(ssBtn, &QPushButton::clicked, m_graph, &GraphWidget::saveScreenshot);
 
     // --- Tab widget ---
     m_tabs = new QTabWidget(this);

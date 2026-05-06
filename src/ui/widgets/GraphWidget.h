@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 // GraphWidget — rolling real-time graph of up to 8 configurable curves.
 // X-axis: last N seconds (default 10 s). Y-axis: auto-scale.
+// A full session history is kept separately for CSV export.
 // ---------------------------------------------------------------------------
 
 class GraphWidget : public QWidget {
@@ -18,6 +19,13 @@ public:
     void pushAttitude(const AttitudeData& d);
     void pushGps     (const GpsData& d);
     void pushMtf01   (const Mtf01Data& d);
+
+    // Export all session data to a CSV file (opens a file dialog).
+    // PID values are written as comment lines at the top of the file.
+    void exportCsv(const PidData& pid);
+
+    // Render the graph widget to a PNG file (opens a file dialog).
+    void saveScreenshot();
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -30,10 +38,16 @@ private:
     static constexpr int   MAX_SAMPLES = static_cast<int>(WINDOW_SECS * SAMPLE_RATE);
 
     struct Sample { float t; float v; }; // t = elapsed seconds
+
+    // Rolling window used for display (trimmed to WINDOW_SECS)
     std::array<std::deque<Sample>, NUM_CURVES> m_curves;
-    std::array<QCheckBox*, NUM_CURVES>         m_checks{};
-    std::array<QColor, NUM_CURVES>             m_colors;
-    std::array<QString, NUM_CURVES>            m_labels;
+
+    // Full session history used for CSV export (never trimmed)
+    std::array<std::deque<Sample>, NUM_CURVES> m_history;
+
+    std::array<QCheckBox*, NUM_CURVES> m_checks{};
+    std::array<QColor, NUM_CURVES>     m_colors;
+    std::array<QString, NUM_CURVES>    m_labels;
 
     float m_elapsed = 0.0f; // seconds since start
     int   m_timerId = 0;

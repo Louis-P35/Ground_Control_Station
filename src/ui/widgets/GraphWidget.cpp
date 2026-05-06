@@ -2,6 +2,11 @@
 #include <QPainter>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFileDialog>
+#include <QTextStream>
+#include <QFile>
+#include <QDir>
+#include <QDateTime>
 #include <QtMath>
 #include <algorithm>
 
@@ -55,10 +60,16 @@ void GraphWidget::sampleNow() {
         m_gyrX, m_gyrY, m_gyrZ, m_flowQ
     };
     for (int i = 0; i < NUM_CURVES; ++i) {
-        m_curves[i].push_back({m_elapsed, values[i]});
+        Sample s{m_elapsed, values[i]};
+
+        // Rolling display window: trim samples older than WINDOW_SECS
+        m_curves[i].push_back(s);
         while (!m_curves[i].empty() &&
                m_elapsed - m_curves[i].front().t > WINDOW_SECS)
             m_curves[i].pop_front();
+
+        // Full session history for CSV export — never trimmed
+        m_history[i].push_back(s);
     }
 }
 
@@ -159,4 +170,68 @@ void GraphWidget::quatToEuler(float qw, float qx, float qy, float qz,
     float sinp = 2*(qw*qy - qz*qx);
     pitch = qRadiansToDegrees(std::abs(sinp) >= 1 ? std::copysign(M_PI/2, sinp) : std::asin(sinp));
     yaw   = qRadiansToDegrees(std::atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz)));
+}
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+void GraphWidget::exportCsv(const PidData& pid) {
+    QString defaultName = QString("telemetry_%1.csv")
+        .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    QString path = QFileDialog::getSaveFileName(
+        this, "Export Telemetry CSV",
+        QDir::homePath() + "/" + defaultName,
+        "CSV Files (*.csv)");
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
+    QTextStream out(&file);
+
+    // PID values as comment header so they are preserved alongside the data
+    auto writePid = [&](const QString& name, const PidAxis& a) {
+        out << QString("# %1: Kp=%2, Ki=%3, Kd=%4\n")
+               .arg(name, -16)
+               .arg(a.kp, 0, 'f', 6)
+               .arg(a.ki, 0, 'f', 6)
+               .arg(a.kd, 0, 'f', 6);
+    };
+    out << "# GCS Telemetry Export — " << QDateTime::currentDateTime().toString(Qt::ISODate) << "\n";
+    out << "# PID Configuration\n";
+    writePid("Rate Roll",       pid.rate_roll);
+    writePid("Rate Pitch",      pid.rate_pitch);
+    writePid("Rate Yaw",        pid.rate_yaw);
+    writePid("Attitude Roll",   pid.attitude_roll);
+    writePid("Attitude Pitch",  pid.attitude_pitch);
+    writePid("Attitude Yaw",    pid.attitude_yaw);
+    writePid("Position X",      pid.position_x);
+    writePid("Position Y",      pid.position_y);
+    writePid("Position Z",      pid.position_z);
+    out << "#\n";
+
+    // Column headers matching m_labels order
+    out << "timestamp_s,roll_deg,pitch_deg,yaw_deg,alt_m,gyr_x_dps,gyr_y_dps,gyr_z_dps,flow_quality\n";
+
+    // All curves are sampled simultaneously so curve[0] drives the row count
+    size_t n = m_history[0].size();
+    for (size_t row = 0; row < n; ++row) {
+        out << QString::number(static_cast<double>(m_history[0][row].t), 'f', 3);
+        for (int c = 0; c < NUM_CURVES; ++c)
+            out << ',' << QString::number(static_cast<double>(m_history[c][row].v), 'f', 4);
+        out << '\n';
+    }
+}
+
+void GraphWidget::saveScreenshot() {
+    QString defaultName = QString("graph_%1.png")
+        .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    QString path = QFileDialog::getSaveFileName(
+        this, "Save Graph Screenshot",
+        QDir::homePath() + "/" + defaultName,
+        "PNG Images (*.png)");
+    if (path.isEmpty()) return;
+
+    // grab() renders the widget off-screen at its current size
+    grab().save(path, "PNG");
 }
