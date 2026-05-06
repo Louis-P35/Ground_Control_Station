@@ -20,7 +20,7 @@ cmake --build build --config Release --parallel
 
 ```bash
 start build/Release/GroundControlStation.exe
-py simulator.py
+start "GCS Simulator" cmd /k "py simulator.py"
 ```
 
 ## Architecture

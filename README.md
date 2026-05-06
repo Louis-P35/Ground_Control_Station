@@ -106,6 +106,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2
 cmake --build build --config Release --parallel
 ```
 
+Run the app and the simulator (opens in a separate window, close with Ctrl+C):
+
+```bash
+start build/Release/GroundControlStation.exe
+start "GCS Simulator" cmd /k "py simulator.py"
+```
+
 Deploy Qt DLLs next to the executable:
 
 ```bash
