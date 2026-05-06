@@ -1,5 +1,7 @@
 # Ground Control Station
 
+![GCS Overview](docs/screenshots/gcs_overview.png)
+
 A desktop Ground Control Station (GCS) for a custom quadcopter drone, built with **C++17** and **Qt6**.
 
 The drone communicates with the GCS over **WiFi UDP at 100 Hz**. Communication is bidirectional: the drone streams telemetry continuously, and the GCS can send configuration commands back.
