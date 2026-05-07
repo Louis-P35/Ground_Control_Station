@@ -19,6 +19,7 @@ class PidConfigWidget;
 class GraphWidget;
 class TerminalWidget;
 class MapWidget;
+class VideoWidget;
 
 // ---------------------------------------------------------------------------
 // MainWindow — single application window.
@@ -69,6 +70,7 @@ private:
     GraphWidget*     m_graph    = nullptr;
     TerminalWidget*  m_terminal = nullptr;
     MapWidget*       m_map      = nullptr;
+    VideoWidget*     m_video    = nullptr;
 
     // Status bar labels
     QLabel* m_statusConn    = nullptr;

@@ -18,6 +18,7 @@
 #include "widgets/GraphWidget.h"
 #include "widgets/TerminalWidget.h"
 #include "widgets/MapWidget.h"
+#include "widgets/VideoWidget.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Ground Control Station");
@@ -90,6 +91,7 @@ void MainWindow::setupUi() {
     m_graph    = new GraphWidget(this);
     m_terminal = new TerminalWidget(this);
     m_map      = new MapWidget(this);
+    m_video    = new VideoWidget(this);
 
     // --- Tab 0: Dashboard ---
     auto* dashTab = new QWidget(this);
@@ -168,6 +170,9 @@ void MainWindow::setupUi() {
 
     // --- Tab 2: Map — MapWidget manages its own overlay buttons internally ---
     m_tabs->addTab(m_map, "Map");
+
+    // --- Tab 3: Video — live feed from a USB camera or video receiver ---
+    m_tabs->addTab(m_video, "Video");
 
     setCentralWidget(m_tabs);
 }

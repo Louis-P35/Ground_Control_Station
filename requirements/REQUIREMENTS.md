@@ -266,6 +266,8 @@ Row 2: [terminal          x2              ] [PID config            x2     ]
 
 **Tab 2 — Map**: the satellite map widget (`MapWidget`) occupies the full tab area.
 
+**Tab 3 — Video**: the video widget (`VideoWidget`) occupies the full tab area.
+
 ### 5.2 Widget List
 
 ---
@@ -423,6 +425,26 @@ Satellite/street map view occupying the full **Map** tab. Tiles are fetched from
 - Fetched tiles are always stored in the in-memory cache regardless of current zoom level; the key encodes `layer/z/x/y` so OSM and satellite tiles never collide
 - Max 6 concurrent HTTP tile requests; max 512 tiles in memory
 - OSM attribution displayed as required by the tile usage policy
+
+---
+
+#### W12 — Video (`VideoWidget`)
+
+Live video feed occupying the full **Video** tab. Displays input from any camera recognized by the OS (built-in webcam, USB webcam, USB video receiver, etc.).
+
+**Controls:**
+- **Camera dropdown** — lists all available video input devices by name; selection switches the active camera immediately
+- Device list refreshes automatically when cameras are plugged in or unplugged (`QMediaDevices::videoInputsChanged`)
+
+**Display:**
+- `QVideoWidget` fills the remaining space, rendering the live camera feed at native aspect ratio
+- Status label below the dropdown: green = camera active (shows device name), red = error message, gray = no camera detected
+
+**Technical notes:**
+- Uses Qt6 Multimedia: `QCamera`, `QMediaCaptureSession`, `QVideoWidget`, `QMediaDevices`
+- The `QMediaCaptureSession` persists across camera switches (only `setCamera()` is called)
+- On Windows, requires `windeployqt` to deploy the FFmpeg/Windows media backend plugins at runtime
+- Camera errors are reported via `QCamera::errorOccurred` and displayed in the status label
 
 ---
 

@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network OpenGL OpenGLWidgets Multimedia MultimediaWidgets)
 
 set(SOURCES
     src/main.cpp
@@ -27,6 +27,7 @@ set(SOURCES
     src/ui/widgets/MotorWidget.cpp
     src/ui/widgets/StatusWidget.cpp
     src/ui/widgets/MapWidget.cpp
+    src/ui/widgets/VideoWidget.cpp
     src/ui/widgets/PidConfigWidget.cpp
     src/ui/widgets/GraphWidget.cpp
     src/ui/widgets/TerminalWidget.cpp
@@ -47,6 +48,7 @@ set(HEADERS
     src/ui/widgets/MotorWidget.h
     src/ui/widgets/StatusWidget.h
     src/ui/widgets/MapWidget.h
+    src/ui/widgets/VideoWidget.h
     src/ui/widgets/PidConfigWidget.h
     src/ui/widgets/GraphWidget.h
     src/ui/widgets/TerminalWidget.h
@@ -63,6 +65,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Network
     Qt6::OpenGL
     Qt6::OpenGLWidgets
+    Qt6::Multimedia
+    Qt6::MultimediaWidgets
 )
 
 # Fixed-function OpenGL (glBegin/glEnd etc.) requires opengl32 on Windows
