@@ -68,6 +68,24 @@ The application writes one log file per session to `<exe_dir>/logs/gcs_YYYY-MM-D
 
 When adding a new feature or subsystem, add the relevant log calls (start, stop, errors). The goal is that if the app crashes silently, the log file gives enough context to understand what happened.
 
+## Unit tests
+
+The test suite lives in `tests/` and is built as the `GCSTests` target.
+
+**Any code modification that adds or changes backend logic must be accompanied by unit tests.** This is mandatory, not optional:
+- New packet type → add decode tests in `TestPacketParser.cpp`
+- New command → add structure + retry tests in `TestCommandSender.cpp`
+- New backend class → add a new `TestFoo.cpp`, register its runner in `main.cpp` and `tests/CMakeLists.txt`
+- Bug fix → add a regression test that would have caught the bug
+
+Run the tests after every change:
+```powershell
+$env:PATH = "C:/Qt/6.8.2/msvc2022_64/bin;$env:PATH"
+cmake --build build --target GCSTests
+build\tests\Release\GCSTests.exe
+```
+All tests must pass before committing.
+
 ## Rules for code modifications
 
 - When modifying code, **propose updating `requirements/REQUIREMENTS.md`** if the spec changes.
