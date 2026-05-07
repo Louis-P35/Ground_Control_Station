@@ -2,7 +2,8 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
-#include <QStandardPaths>
+#include <QDir>
+#include <QCoreApplication>
 #include <QMutex>
 #include <QMutexLocker>
 
@@ -26,8 +27,10 @@ static void writeLine(const char* level, const QString& msg) {
 // Public API
 // ---------------------------------------------------------------------------
 void AppLogger::init() {
-    QString path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-                   + "/gcs_app.log";
+    // Place logs/ next to the executable so the file is easy to find
+    QString logDir = QCoreApplication::applicationDirPath() + "/logs";
+    QDir().mkpath(logDir);
+    QString path = logDir + "/gcs_app.log";
     s_file.setFileName(path);
     if (!s_file.open(QIODevice::Append | QIODevice::Text)) return;
     writeLine("INFO", QString("=== GCS started  (log: %1) ===").arg(path));
