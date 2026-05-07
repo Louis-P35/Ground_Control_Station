@@ -412,6 +412,11 @@ Satellite/street map view occupying the full **Map** tab. Tiles are fetched from
 - Duplicates filtered out (point only added when position actually changes)
 - Toggled by the **Trail** checkbox overlay (checked by default)
 
+**Video PiP overlay:**
+- Live camera preview displayed in the **bottom-left corner** of the map, overlaid on the tiles (320×180 px, white border)
+- Toggled by the **[Video]** button in the top-right overlay (blue = visible, dark = hidden); shown by default
+- Receives the same frame stream as the Video tab with no second camera open (see technical notes)
+
 **Interactions:**
 - **Mouse wheel** — zoom in/out anchored on cursor position
 - **Left drag** — pan map; disables follow mode
@@ -419,12 +424,14 @@ Satellite/street map view occupying the full **Map** tab. Tiles are fetched from
 - **[+] / [−]** buttons — zoom in / zoom out (zoom range: 2–19)
 - **Trail** checkbox — show/hide the GPS trail
 - **[Satellite] / [Street map]** button — toggle between OSM street map and Esri World Imagery satellite photos; pending requests for the previous layer are cancelled immediately on switch
+- **[Video]** button — show/hide the camera PiP overlay
 
 **Technical notes:**
 - In-flight tile requests for the previous zoom level are cancelled immediately on zoom change to free HTTP slots for the new level (fixes black-tile flicker on rapid zoom)
 - Fetched tiles are always stored in the in-memory cache regardless of current zoom level; the key encodes `layer/z/x/y` so OSM and satellite tiles never collide
 - Max 6 concurrent HTTP tile requests; max 512 tiles in memory
 - OSM attribution displayed as required by the tile usage policy
+- **PiP frame sharing**: `VideoWidget` routes camera frames through a `QVideoSink` (the session's sole output). Both its own `QVideoWidget` and the PiP `QVideoWidget` subscribe to `videoFrameChanged` → `setVideoFrame`. This avoids opening the camera device a second time and works with Qt 6.8 (which does not have `QMediaCaptureSession::addVideoOutput`)
 
 ---
 
