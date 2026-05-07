@@ -1,6 +1,5 @@
 #include "AppLogger.h"
 #include <QFile>
-#include <QTextStream>
 #include <QDateTime>
 #include <QDir>
 #include <QCoreApplication>
@@ -16,23 +15,39 @@ static QMutex s_mutex;
 static void writeLine(const char* level, const QString& msg) {
     QMutexLocker lock(&s_mutex);
     if (!s_file.isOpen()) return;
-    QTextStream s(&s_file);
-    s << QDateTime::currentDateTime().toString("[yyyy-MM-dd HH:mm:ss.zzz] ")
-      << '[' << level << "] " << msg << '\n';
-    // Flush after every write so the log is readable even if the app crashes
+    // Write directly via QFile::write() to avoid QTextStream's internal buffer,
+    // then flush immediately so the line is on disk even if the app crashes.
+    QString line = QDateTime::currentDateTime().toString("[yyyy-MM-dd HH:mm:ss.zzz] [")
+                 + level + "] " + msg + '\n';
+    s_file.write(line.toUtf8());
     s_file.flush();
 }
+
+static constexpr int MAX_LOG_FILES = 10;
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 void AppLogger::init() {
-    // Place logs/ next to the executable so the file is easy to find
     QString logDir = QCoreApplication::applicationDirPath() + "/logs";
-    QDir().mkpath(logDir);
-    QString path = logDir + "/gcs_app.log";
+    QDir dir;
+    dir.mkpath(logDir);
+
+    // One file per session, named by launch timestamp
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    QString path = logDir + "/gcs_" + timestamp + ".log";
+
+    // Keep only the MAX_LOG_FILES most recent files — delete the oldest if needed
+    QFileInfoList files = QDir(logDir).entryInfoList(
+        {"gcs_*.log"}, QDir::Files, QDir::Time | QDir::Reversed);
+    // entryInfoList with QDir::Reversed + QDir::Time → oldest first
+    while (files.size() >= MAX_LOG_FILES) {
+        QFile::remove(files.first().absoluteFilePath());
+        files.removeFirst();
+    }
+
     s_file.setFileName(path);
-    if (!s_file.open(QIODevice::Append | QIODevice::Text)) return;
+    if (!s_file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
     writeLine("INFO", QString("=== GCS started  (log: %1) ===").arg(path));
 }
 
