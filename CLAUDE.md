@@ -47,6 +47,27 @@ The code must be well commented. Add comments freely wherever they bring value: 
 
 All code, comments, commit messages, documentation, and README files must be written in **English**. No exceptions.
 
+## Logging
+
+The application maintains a persistent log file at `<user Documents>/gcs_app.log` (append mode, opened at startup).
+
+**Log these events:**
+- App startup / shutdown
+- Network connect / disconnect (with drone IP)
+- Camera open / close / errors
+- Packet parser errors (bad magic, CRC failure, unknown packet type)
+- PID command sent (axis + values)
+- Any unrecoverable error or unexpected state
+
+**Do NOT log:**
+- Per-packet telemetry (100 Hz — would fill disk immediately)
+- Normal UI interactions
+- Map tile fetches
+
+**Format:** `[YYYY-MM-DD HH:mm:ss.zzz] [LEVEL] message` — levels: `INFO`, `WARN`, `ERROR`.
+
+When adding a new feature or subsystem, add the relevant log calls (start, stop, errors). The goal is that if the app crashes silently, the log file gives enough context to understand what happened.
+
 ## Rules for code modifications
 
 - When modifying code, **propose updating `requirements/REQUIREMENTS.md`** if the spec changes.

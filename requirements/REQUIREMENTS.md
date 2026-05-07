@@ -434,17 +434,19 @@ Live video feed occupying the full **Video** tab. Displays input from any camera
 
 **Controls:**
 - **Camera dropdown** — lists all available video input devices by name; selection switches the active camera immediately
+- **Refresh button** — manually re-enumerates devices (useful after granting camera permission at runtime)
 - Device list refreshes automatically when cameras are plugged in or unplugged (`QMediaDevices::videoInputsChanged`)
 
 **Display:**
 - `QVideoWidget` fills the remaining space, rendering the live camera feed at native aspect ratio
-- Status label below the dropdown: green = camera active (shows device name), red = error message, gray = no camera detected
+- Status label: green = camera active (shows device name), orange = no camera found, red = error message
 
 **Technical notes:**
 - Uses Qt6 Multimedia: `QCamera`, `QMediaCaptureSession`, `QVideoWidget`, `QMediaDevices`
 - The `QMediaCaptureSession` persists across camera switches (only `setCamera()` is called)
 - On Windows, requires `windeployqt` to deploy the FFmpeg/Windows media backend plugins at runtime
 - Camera errors are reported via `QCamera::errorOccurred` and displayed in the status label
+- **Qt gotcha**: when items are added to the combo while signals are blocked, Qt silently sets `currentIndex=0`; a subsequent `setCurrentIndex(0)` emits no signal. `startCamera()` must therefore be called explicitly after populating the list
 
 ---
 
@@ -479,6 +481,30 @@ Always visible, outside any widget:
 - All network I/O must be **non-blocking** relative to the UI thread
 - Code must be **well-commented** (especially protocol parsing and OpenGL rendering)
 - No external dependencies beyond Qt6 and standard OpenGL — no third-party UI libs
+
+### 7.1 Application Logging
+
+The application writes a persistent log file to help diagnose crashes and unexpected behaviour.
+
+**Log file location:** `<user Documents>/gcs_app.log`
+
+**What to log (important events only — not a high-frequency data stream):**
+- Application startup and shutdown
+- Network connection established / lost (with drone IP)
+- Camera open / close / errors
+- Packet parser errors (bad magic, CRC failure, unknown type)
+- PID command sent (axis + values)
+- Any unrecoverable error or unexpected state
+
+**What NOT to log:**
+- Per-packet telemetry data (100 Hz → would fill disk in minutes)
+- Normal UI interactions (tab switches, button clicks)
+- Tile fetch success (map noise)
+
+**Format:** `[YYYY-MM-DD HH:mm:ss.zzz] [LEVEL] message`
+Levels: `INFO`, `WARN`, `ERROR`.
+
+**Implementation:** a lightweight `AppLogger` singleton (or free functions) writing to `QFile` with `QTextStream`. Log file is opened in append mode at startup and closed at shutdown. No log rotation required for now.
 
 ---
 
