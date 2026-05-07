@@ -519,4 +519,272 @@ Levels: `INFO`, `WARN`, `ERROR`.
 
 ## 8. Out of Scope
 
-- Flight logging to file (future feature)
+- Flight logging to file (covered in section 9 below)
+
+---
+
+## 9. Future Implementation Roadmap
+
+This section documents planned improvements, categorised by theme. Each item includes a motivation, a detailed specification, and an estimated complexity. Items are ordered by priority within each category.
+
+---
+
+### 9.1 Safety & Alerts
+
+#### 9.1.1 — Visual and audible alerts
+
+**Motivation:** Critical flight events (battery critical, GPS fix lost, signal lost) currently produce no warning beyond a colour change in the status bar, which the operator may miss during a flight.
+
+**Specification:**
+- A dedicated `AlertManager` class (backend layer, no Widget dep) receives telemetry events and evaluates configurable thresholds.
+- Triggered alerts are emitted as a Qt signal to `MainWindow`, which overlays a full-width banner at the top of the window (red for critical, amber for warning).
+- Banner text is descriptive: *"⚠ Battery critical — 14 %"*, *"⚠ GPS fix lost"*, *"⚠ Link lost — 3.2 s"*.
+- An optional audible beep is played via `QSoundEffect` (Qt Multimedia).
+- Alerts auto-dismiss when the condition clears, with a minimum display time of 3 s.
+
+**Thresholds (configurable, saved to QSettings):**
+
+| Alert                  | Level    | Default threshold            |
+|------------------------|----------|------------------------------|
+| Battery low            | WARNING  | < 30 %                       |
+| Battery critical       | CRITICAL | < 15 %                       |
+| GPS fix lost           | WARNING  | fix_type drops below 1       |
+| GPS satellites low     | WARNING  | < 4 satellites               |
+| Link lost              | CRITICAL | no packet for > 2 s          |
+| Packet loss high       | WARNING  | PKT_ATTITUDE loss > 10 %     |
+| Motor imbalance        | WARNING  | max(motor_%) − min(motor_%) > 30 % |
+
+**Complexity:** medium (~2 days).
+
+---
+
+#### 9.1.2 — Reconnection indicator
+
+**Motivation:** After a link loss, the operator has no feedback on whether the GCS is attempting to recover contact or whether the situation is permanent.
+
+**Specification:**
+- When `connectionStateChanged(false)` fires, the status bar label switches to *"Reconnecting… (4.2 s)"* and a running counter shows the elapsed time since loss.
+- The counter increments via the existing 500 ms status timer — no new thread required.
+- On reconnect (`connectionStateChanged(true)`), the counter resets and an INFO alert is shown for 3 s: *"Link restored after 4.2 s"*.
+
+**Complexity:** low (~2 h).
+
+---
+
+### 9.2 Flight Data Recording
+
+#### 9.2.1 — Automatic flight log (binary)
+
+**Motivation:** All telemetry data received during a session exists only in memory (in `GraphWidget::m_history`). It is lost at application close unless the user manually triggers a CSV export. A post-flight analysis capability requires persistent recording.
+
+**Specification:**
+- A `FlightRecorder` class (backend layer) opens a binary log file at the first received telemetry packet (not at startup, to avoid empty files for sessions without drone connection).
+- File location: `<exe_dir>/flights/flight_YYYY-MM-DD_HH-mm-ss.bin`
+- Same retention policy as application logs: max 20 flight files; oldest deleted on overflow.
+- The recorder writes raw packets as received (header + payload + CRC), preceded by a 4-byte little-endian entry length. This makes the file self-describing and replayable.
+- `FlightRecorder` listens to the same `PacketParser` signals as `MainWindow`, connected with `Qt::QueuedConnection` from the network thread.
+- A **Replay** mode (future, not in this phase) would read this file and feed it back into `PacketParser` at the original rate.
+
+**File format:**
+
+```
+[4-byte entry_len] [raw UDP packet bytes (entry_len bytes)]
+[4-byte entry_len] [raw UDP packet bytes]
+...
+```
+
+**Complexity:** medium (~1 day).
+
+---
+
+#### 9.2.2 — CSV auto-export on session end
+
+**Motivation:** Users who want CSV data currently must remember to click "Export CSV" in the Graph tab before closing the application.
+
+**Specification:**
+- On `MainWindow` close event, if `GraphWidget::m_history` contains at least one sample, automatically export a CSV to `<exe_dir>/flights/` with the same timestamp naming as the flight log.
+- A non-blocking `QMessageBox` (yes/no, 5 s auto-confirm "yes") is shown: *"Export telemetry CSV before closing?"*
+- PID values at time of close are included in the header comment lines.
+
+**Complexity:** low (~3 h).
+
+---
+
+### 9.3 Automated Testing
+
+#### 9.3.1 — Unit tests: PacketParser
+
+**Motivation:** `PacketParser` contains the most critical and failure-sensitive logic in the project (binary framing, CRC, type dispatch). Any regression here would silently corrupt telemetry data. Currently there are zero tests.
+
+**Specification:**
+- Test framework: **Qt Test** (already available, no new dependency).
+- Test file: `tests/test_packet_parser.cpp`.
+- CMake target: `GroundControlStationTests`, built separately (`cmake --build build --target GroundControlStationTests`).
+
+**Test cases:**
+
+| Test name                     | Description                                            |
+|-------------------------------|--------------------------------------------------------|
+| `validAttitude`               | Build a well-formed PktAttitude, verify signal emitted with correct values |
+| `validGps`                    | Same for PktGps                                        |
+| `badMagic`                    | Feed random bytes, verify no signal emitted            |
+| `badVersion`                  | Valid magic, wrong version byte                        |
+| `crcMismatch`                 | Flip one payload byte, verify packet discarded         |
+| `truncatedPacket`             | Feed exactly header_len − 1 bytes, verify no crash     |
+| `multiplePacketsInOneDatagram`| Two valid packets concatenated, verify two signals     |
+| `packetLossCounter`           | Feed seq 1, 2, 4 (skip 3), verify 25 % loss reported  |
+
+**Complexity:** medium (~1.5 days).
+
+---
+
+#### 9.3.2 — Unit tests: CommandSender
+
+**Motivation:** ACK/retry logic has non-trivial state. A regression (e.g., double-send, infinite retry) would waste bandwidth and confuse the drone.
+
+**Specification:**
+- Mock `UdpLink` using a subclass that captures `sendDatagram()` calls into a `QList<QByteArray>`.
+- Inject fake `ackReceived` signals to simulate drone responses.
+
+**Test cases:**
+
+| Test name           | Description                                              |
+|---------------------|----------------------------------------------------------|
+| `sendOnce`          | `sendSetPid()` → exactly 1 datagram sent                |
+| `retryOnNoAck`      | No ACK for 200 ms → retransmit, up to 3 times           |
+| `stopOnAck`         | ACK received → no further retransmit                    |
+| `maxRetriesExceeded`| After 3 retries, command removed from pending map        |
+| `crcCorrect`        | Verify the CRC in the built packet matches manual calc   |
+
+**Complexity:** medium (~1 day).
+
+---
+
+#### 9.3.3 — CI/CD with GitHub Actions
+
+**Motivation:** Currently there is no automated build verification. A bad push can break the build silently until the next manual rebuild.
+
+**Specification:**
+- Workflow file: `.github/workflows/build.yml`.
+- Triggers: `push` and `pull_request` on `main`.
+- **Windows job**: MSVC 2022, Qt 6.8.2 installed via `jurplel/install-qt-action`, build Release, run tests.
+- **Linux job** (optional): GCC 13, Qt 6.x from apt, build Release (camera and OpenGL may be stubbed).
+- Artifacts: upload `GroundControlStation.exe` as a build artifact for 7 days.
+- Badge in README showing build status.
+
+**Complexity:** medium (~4 h for Windows CI, ~1 day if Linux is added).
+
+---
+
+### 9.4 Configuration & Persistence
+
+#### 9.4.1 — Configurable UDP port
+
+**Motivation:** The drone's target port is hardcoded to 5005. If the port needs to change (multiple drones, firewall rule), a recompile is required.
+
+**Specification:**
+- The port is read at startup from `QSettings` (Windows registry / `.ini` file on Linux).
+- A small **Settings dialog** (accessible from a menu bar or toolbar button) allows changing the port, with a note that a restart is required to apply.
+- Default: 5005. Valid range: 1024–65535.
+- The status bar "Port: 5005" label is updated to reflect the configured value.
+
+**Complexity:** low (~3 h).
+
+---
+
+#### 9.4.2 — PID preset save / load
+
+**Motivation:** When tuning PID values, the operator frequently wants to save a known-good configuration and restore it if a new tune goes wrong. Currently all PID values are lost on close.
+
+**Specification:**
+- A **Save Preset** button in `PidConfigWidget` opens a `QInputDialog` to name the preset, then saves all 9 axes to `QSettings`.
+- A **Load Preset** dropdown lists saved presets; selecting one fills the fields (but does not send to drone — the user must still click "Send").
+- A **Delete Preset** button removes the selected preset from storage.
+- Presets are stored under `QSettings` group `"PidPresets/<name>"`.
+
+**Complexity:** medium (~1 day).
+
+---
+
+### 9.5 Map Enhancements
+
+#### 9.5.1 — Mission waypoint editor
+
+**Motivation:** The map currently shows the drone position but does not support mission planning.
+
+**Specification:**
+- A toggle button **[Edit Mission]** enters waypoint edit mode.
+- In edit mode, left-clicking on the map adds a numbered waypoint marker (yellow circle with index).
+- Waypoints are connected by dashed lines in order.
+- Right-clicking a waypoint shows a context menu: *Remove*, *Move* (then click new location).
+- A side panel shows the waypoint list with editable altitude and speed per waypoint.
+- Waypoints are stored as `QVector<WaypointData>{lat, lon, alt_m, speed_ms}`.
+- A **Upload Mission** button sends waypoints to the drone (new protocol packet `PKT_SET_MISSION`, to be defined).
+- A **Clear Mission** button resets the editor.
+
+**Complexity:** high (~1 week).
+
+---
+
+#### 9.5.2 — Home point marker
+
+**Motivation:** The operator needs to know where the drone took off from at a glance, especially to judge return-to-home distance.
+
+**Specification:**
+- The first GPS fix received in a session is stored as the home point.
+- A distinct green marker (house icon drawn via `QPainterPath`) is rendered at the home coordinates.
+- A thin dashed line connects the home marker to the current drone position, with the distance in metres displayed at the midpoint.
+- A **[Set Home]** button in the map overlay manually reassigns the home point to the current drone position.
+
+**Complexity:** low (~3 h).
+
+---
+
+### 9.6 Code Quality & Tooling
+
+#### 9.6.1 — Static analysis with clang-tidy
+
+**Motivation:** `PacketParser`, `CommandSender`, and `TelemetryState` contain low-level memory operations (raw pointers, `std::memcpy`, mutex usage) where subtle bugs are hard to spot in review.
+
+**Specification:**
+- Add a `CMakePresets.json` with a `clang-tidy` preset.
+- `.clang-tidy` configuration at repo root enables: `cppcoreguidelines-*`, `bugprone-*`, `modernize-*`, `performance-*`.
+- Exclude Qt-generated `moc_*.cpp` files via `HeaderFilterRegex`.
+- CI runs clang-tidy on the `src/backend/` directory as a non-blocking check (warnings only, does not fail the build initially).
+
+**Complexity:** low (~2 h setup).
+
+---
+
+#### 9.6.2 — Simulator / Protocol sync validation
+
+**Motivation:** `simulator.py` manually duplicates the packet structures from `Protocol.h`. A field added to `PktStatus` in C++ that is not added to the Python encoder produces silently wrong telemetry.
+
+**Specification:**
+- Add a Python test `tests/test_simulator_protocol.py` that:
+  1. Imports `simulator.py` as a module.
+  2. Builds one packet of each type using the simulator's encoder.
+  3. Verifies magic, version, CRC, and payload_len match the values defined in `Protocol.h` (read via a small C++ struct-size printer or hardcoded expected sizes).
+- Run this test in CI before the C++ build step.
+
+**Complexity:** low (~3 h).
+
+---
+
+### 9.7 Summary Table
+
+| ID     | Feature                          | Category      | Priority  | Complexity |
+|--------|----------------------------------|---------------|-----------|------------|
+| 9.1.1  | Visual & audible alerts          | Safety        | 🔴 High   | Medium     |
+| 9.1.2  | Reconnection indicator           | Safety        | 🔴 High   | Low        |
+| 9.2.1  | Automatic binary flight log      | Recording     | 🔴 High   | Medium     |
+| 9.3.1  | Unit tests — PacketParser        | Testing       | 🔴 High   | Medium     |
+| 9.3.2  | Unit tests — CommandSender       | Testing       | 🔴 High   | Medium     |
+| 9.2.2  | CSV auto-export on close         | Recording     | 🟡 Medium | Low        |
+| 9.3.3  | CI/CD GitHub Actions             | Tooling       | 🟡 Medium | Medium     |
+| 9.4.1  | Configurable UDP port            | Configuration | 🟡 Medium | Low        |
+| 9.4.2  | PID preset save / load           | Configuration | 🟡 Medium | Medium     |
+| 9.5.2  | Home point marker on map         | Map           | 🟡 Medium | Low        |
+| 9.6.1  | Static analysis (clang-tidy)     | Tooling       | 🟢 Low    | Low        |
+| 9.6.2  | Simulator / Protocol sync test   | Tooling       | 🟢 Low    | Low        |
+| 9.5.1  | Mission waypoint editor          | Map           | 🟢 Low    | High       |
