@@ -79,3 +79,8 @@ endif()
 if(WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
+
+# Unit tests — build and register with CTest.
+# Run with: cmake --build build --target GCSTests && ctest --test-dir build -V
+enable_testing()
+add_subdirectory(tests)

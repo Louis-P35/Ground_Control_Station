@@ -32,8 +32,9 @@ public:
     int lastPacketAgeMs() const;
 
 public slots:
-    // Call from any thread — thread-safe via Qt::QueuedConnection
-    void sendDatagram(const QByteArray& data);
+    // Call from any thread — thread-safe via Qt::QueuedConnection.
+    // Virtual so MockUdpLink can capture outgoing datagrams in unit tests.
+    virtual void sendDatagram(const QByteArray& data);
     void start();
 
 signals:
