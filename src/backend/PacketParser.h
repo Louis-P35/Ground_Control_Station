@@ -5,6 +5,9 @@
 #include "Protocol.h"
 #include "TelemetryState.h"
 
+// For sync-error log throttling (avoid spamming on corrupted streams)
+#include <QElapsedTimer>
+
 // ---------------------------------------------------------------------------
 // PacketParser — parses raw UDP datagrams into typed structs.
 //
@@ -49,4 +52,9 @@ private:
     };
     std::array<SeqTracker, 8> m_seqTracker; // index = type (0 unused)
     void trackSeq(uint8_t type, uint16_t seq);
+
+    // Throttle sync-error logging: at most one warning per second to avoid
+    // flooding the log when the stream is continuously corrupted.
+    QElapsedTimer m_syncWarnTimer;
+    bool          m_syncWarnTimerStarted = false;
 };

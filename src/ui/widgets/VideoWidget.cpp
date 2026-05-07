@@ -1,4 +1,5 @@
 #include "VideoWidget.h"
+#include "backend/AppLogger.h"
 #include <QCamera>
 #include <QCameraDevice>
 #include <QMediaCaptureSession>
@@ -99,12 +100,15 @@ void VideoWidget::populateCameraList() {
     m_combo->blockSignals(false);
 
     if (cameras.isEmpty()) {
+        AppLogger::warn("VideoWidget: no cameras detected (check OS privacy settings)");
         m_combo->addItem("No camera detected");
         m_status->setText("No camera found — check Windows Privacy Settings → Camera");
         m_status->setStyleSheet("color: #ff8844; font-size: 11px;");
         stopCamera();
         return;
     }
+
+    AppLogger::info(QString("VideoWidget: %1 camera(s) detected").arg(cameras.size()));
 
     // Restore previous selection, or default to first device
     int restoreIdx = 0;
@@ -133,20 +137,24 @@ void VideoWidget::startCamera(const QVariant& deviceVariant) {
     m_camera = new QCamera(device, this);
     m_session->setCamera(m_camera);
 
-    // Report camera errors in the status label
+    // Report camera errors in the status label and log file
     connect(m_camera, &QCamera::errorOccurred, this,
-            [this](QCamera::Error /*err*/, const QString& msg) {
+            [this, device](QCamera::Error /*err*/, const QString& msg) {
+        AppLogger::error(QString("VideoWidget: camera error on \"%1\": %2")
+                         .arg(device.description()).arg(msg));
         m_status->setText("Error: " + msg);
         m_status->setStyleSheet("color: #ff6060; font-size: 11px;");
     });
 
     m_camera->start();
+    AppLogger::info(QString("VideoWidget: camera started \"%1\"").arg(device.description()));
     m_status->setText(device.description());
     m_status->setStyleSheet("color: #44cc44; font-size: 11px;");
 }
 
 void VideoWidget::stopCamera() {
     if (!m_camera) return;
+    AppLogger::info("VideoWidget: camera stopped");
     m_camera->stop();
     m_session->setCamera(nullptr);
     delete m_camera;

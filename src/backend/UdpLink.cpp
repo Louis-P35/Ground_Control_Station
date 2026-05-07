@@ -1,4 +1,5 @@
 #include "UdpLink.h"
+#include "AppLogger.h"
 #include <QDateTime>
 
 static constexpr int CONNECTION_TIMEOUT_MS = 2000;
@@ -16,6 +17,7 @@ UdpLink::~UdpLink() = default;
 void UdpLink::start() {
     m_socket = new QUdpSocket(this);
     m_socket->bind(QHostAddress::AnyIPv4, m_listenPort, QUdpSocket::ShareAddress);
+    AppLogger::info(QString("UdpLink: listening on UDP port %1").arg(m_listenPort));
     connect(m_socket, &QUdpSocket::readyRead, this, &UdpLink::onReadyRead);
 
     m_timeoutTimer = new QTimer(this);
@@ -36,6 +38,8 @@ void UdpLink::onReadyRead() {
         if (sender != m_droneAddress || senderPort != m_dronePort) {
             m_droneAddress = sender;
             m_dronePort    = senderPort;
+            AppLogger::info(QString("UdpLink: drone endpoint updated to %1:%2")
+                            .arg(sender.toString()).arg(senderPort));
             emit droneEndpointUpdated(sender.toString(), senderPort);
         }
 
@@ -43,6 +47,8 @@ void UdpLink::onReadyRead() {
 
         if (!m_connected) {
             m_connected = true;
+            AppLogger::info(QString("UdpLink: connected to drone at %1:%2")
+                            .arg(m_droneAddress.toString()).arg(m_dronePort));
             emit connectionStateChanged(true);
         }
 
@@ -55,6 +61,7 @@ void UdpLink::onTimeoutCheck() {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (now - m_lastPacketMs > CONNECTION_TIMEOUT_MS) {
         m_connected = false;
+        AppLogger::warn("UdpLink: connection lost (packet timeout)");
         emit connectionStateChanged(false);
     }
 }

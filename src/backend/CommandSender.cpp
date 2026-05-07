@@ -1,4 +1,5 @@
 #include "CommandSender.h"
+#include "AppLogger.h"
 #include <cstring>
 
 static constexpr int RETRY_INTERVAL_MS = 200;
@@ -25,6 +26,10 @@ void CommandSender::sendSetPid(PidAxisId axis, float kp, float ki, float kd) {
     cmd.seq         = seq;
     m_pending[seq]  = cmd;
 
+    AppLogger::info(QString("CommandSender: PID sent axis=%1 kp=%2 ki=%3 kd=%4 seq=%5")
+                    .arg(static_cast<int>(axis))
+                    .arg(kp, 0, 'f', 4).arg(ki, 0, 'f', 4).arg(kd, 0, 'f', 4)
+                    .arg(seq));
     m_link->sendDatagram(data);
 
     if (!m_retryTimer->isActive())
@@ -41,6 +46,8 @@ void CommandSender::onRetryTimer() {
     for (auto it = m_pending.begin(); it != m_pending.end(); ++it) {
         auto& cmd = it.value();
         if (cmd.retriesLeft <= 0) {
+            AppLogger::warn(QString("CommandSender: PID command seq=%1 dropped (max retries exhausted)")
+                            .arg(it.key()));
             toRemove.append(it.key());
             continue;
         }

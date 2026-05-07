@@ -1,4 +1,5 @@
 #include "PacketParser.h"
+#include "AppLogger.h"
 #include <cstring>
 #include <QtMath>
 
@@ -41,8 +42,13 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
 
     const auto* hdr = reinterpret_cast<const PacketHeader*>(data + offset);
 
-    // Magic / version check
+    // Magic / version check — log at most once per second to avoid flooding
     if (hdr->magic != PACKET_MAGIC || hdr->version != PACKET_VERSION) {
+        if (!m_syncWarnTimerStarted || m_syncWarnTimer.elapsed() > 1000) {
+            AppLogger::warn("PacketParser: sync lost (bad magic/version), resyncing");
+            m_syncWarnTimer.restart();
+            m_syncWarnTimerStarted = true;
+        }
         ++offset; // Advance one byte and try again
         return true;
     }
@@ -56,7 +62,11 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
     std::memcpy(&received, data + offset + sizeof(PacketHeader) + hdr->payload_len, sizeof(uint16_t));
 
     if (computed != received) {
-        // Bad CRC: skip this packet
+        AppLogger::warn(QString("PacketParser: CRC mismatch (type=0x%1, size=%2, got=0x%3, expected=0x%4)")
+                        .arg(hdr->type,    2, 16, QChar('0'))
+                        .arg(totalSize)
+                        .arg(received,  4, 16, QChar('0'))
+                        .arg(computed,  4, 16, QChar('0')));
         offset += totalSize;
         return true;
     }
@@ -156,6 +166,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             break;
         }
         default:
+            AppLogger::warn(QString("PacketParser: unknown packet type 0x%1")
+                            .arg(hdr->type, 2, 16, QChar('0')));
             break;
     }
 

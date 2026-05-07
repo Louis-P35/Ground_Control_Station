@@ -13,6 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network OpenGL OpenGLWidge
 set(SOURCES
     src/main.cpp
 
+    src/backend/AppLogger.cpp
     src/backend/UdpLink.cpp
     src/backend/PacketParser.cpp
     src/backend/TelemetryState.cpp
@@ -34,6 +35,7 @@ set(SOURCES
 )
 
 set(HEADERS
+    src/backend/AppLogger.h
     src/backend/UdpLink.h
     src/backend/PacketParser.h
     src/backend/TelemetryState.h
