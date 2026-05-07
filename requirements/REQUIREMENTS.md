@@ -486,7 +486,9 @@ Always visible, outside any widget:
 
 The application writes a persistent log file to help diagnose crashes and unexpected behaviour.
 
-**Log file location:** `<user Documents>/gcs_app.log`
+**Log file location:** `<exe_dir>/logs/gcs_YYYY-MM-DD_HH-mm-ss.log`
+
+One file is created per session, named with the launch timestamp so successive runs never overwrite each other. The `logs/` directory is created automatically on first run. When more than 10 files are present, the oldest is deleted before creating the new one.
 
 **What to log (important events only — not a high-frequency data stream):**
 - Application startup and shutdown

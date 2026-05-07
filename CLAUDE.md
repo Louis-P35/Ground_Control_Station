@@ -49,7 +49,7 @@ All code, comments, commit messages, documentation, and README files must be wri
 
 ## Logging
 
-The application maintains a persistent log file at `<user Documents>/gcs_app.log` (append mode, opened at startup).
+The application writes one log file per session to `<exe_dir>/logs/gcs_YYYY-MM-DD_HH-mm-ss.log`. The directory is created automatically. When more than 10 files exist, the oldest is deleted. Files are written via `QFile::write()` + `flush()` so data survives crashes.
 
 **Log these events:**
 - App startup / shutdown
