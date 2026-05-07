@@ -25,12 +25,29 @@ GraphWidget::GraphWidget(QWidget* parent) : QWidget(parent) {
     };
     m_labels = { "Roll°","Pitch°","Yaw°","Alt m","Gyr X","Gyr Y","Gyr Z","Flow Q" };
 
-    // Checkbox row at the bottom
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(2,2,2,2);
     mainLayout->setSpacing(2);
-    mainLayout->addStretch(1); // plot area takes stretch
+    mainLayout->addStretch(1); // plot area takes all remaining space
 
+    // Scrollbar — visible only when paused, allows scrubbing through session history
+    m_scrollBar = new QScrollBar(Qt::Horizontal, this);
+    m_scrollBar->setFixedHeight(16);
+    m_scrollBar->setVisible(false);
+    m_scrollBar->setStyleSheet(
+        "QScrollBar:horizontal { background: #1a1a1a; height: 16px; border: 1px solid #333; }"
+        "QScrollBar::handle:horizontal { background: #2a6ac0; min-width: 30px; border-radius: 3px; }"
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }");
+    // Value unit = 0.1 s — pageStep = one full window, singleStep = 1 s
+    m_scrollBar->setSingleStep(10);
+    m_scrollBar->setPageStep(WINDOW_SECS * 10);
+    connect(m_scrollBar, &QScrollBar::valueChanged, this, [this](int val) {
+        m_viewEnd = val / 10.0f;
+        update();
+    });
+    mainLayout->addWidget(m_scrollBar);
+
+    // Checkbox row
     auto* cbRow = new QHBoxLayout();
     cbRow->setSpacing(4);
     for (int i = 0; i < NUM_CURVES; ++i) {
@@ -51,7 +68,9 @@ GraphWidget::GraphWidget(QWidget* parent) : QWidget(parent) {
 void GraphWidget::timerEvent(QTimerEvent*) {
     m_elapsed += 0.01f;
     sampleNow();
-    update();
+    // While paused the display is frozen; skip the repaint to avoid useless work
+    if (!m_paused)
+        update();
 }
 
 void GraphWidget::sampleNow() {
@@ -84,28 +103,44 @@ void GraphWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    // Title
+    // Title — show "PAUSED" indicator when frozen
     QFont f = p.font(); f.setPointSize(9); p.setFont(f);
-    p.setPen(QColor(180,180,180));
-    p.drawText(QRect(0, 2, width(), 16), Qt::AlignCenter, "REAL-TIME GRAPH");
+    p.setPen(m_paused ? QColor(255, 160, 0) : QColor(180, 180, 180));
+    QString title = m_paused ? "REAL-TIME GRAPH  [ PAUSED ]" : "REAL-TIME GRAPH";
+    p.drawText(QRect(0, 2, width(), 16), Qt::AlignCenter, title);
 
-    // Plot area (above checkbox row, reserve ~30px for title + 24px for checkboxes)
-    int cbH = 24 + 4;
-    QRectF plot(30, 20, width() - 34, height() - 20 - cbH);
+    // Bottom reserved space: checkbox row (28px) + scrollbar when visible (18px)
+    int cbH      = 24 + 4;
+    int scrollH  = m_paused ? (16 + 2) : 0;
+    QRectF plot(30, 20, width() - 34, height() - 20 - cbH - scrollH);
     if (plot.width() < 10 || plot.height() < 10) return;
 
-    // Background
-    p.fillRect(plot, QColor(15, 15, 15));
-    p.setPen(QPen(QColor(50, 50, 50), 1));
-    p.drawRect(plot);
+    // Time window: live edge when playing, frozen position when paused
+    float tEnd   = m_paused ? m_viewEnd : m_elapsed;
+    float tStart = tEnd - WINDOW_SECS;
 
-    // Compute global Y range across all visible curves
-    float yMin =  1e9f, yMax = -1e9f;
+    // When paused we draw from the full history (m_curves may not cover the scrolled range)
+    // Use binary search to locate the visible range efficiently
+    auto findRange = [&](const std::deque<Sample>& src)
+        -> std::pair<std::deque<Sample>::const_iterator, std::deque<Sample>::const_iterator>
+    {
+        auto cmp = [](const Sample& s, float t){ return s.t < t; };
+        auto b = std::lower_bound(src.begin(), src.end(), tStart, cmp);
+        if (b != src.begin()) --b; // one point before for line continuity
+        auto e = std::upper_bound(src.begin(), src.end(), tEnd,
+            [](float t, const Sample& s){ return t < s.t; });
+        return {b, e};
+    };
+
+    // Compute Y range over visible samples only
+    float yMin = 1e9f, yMax = -1e9f;
     for (int i = 0; i < NUM_CURVES; ++i) {
         if (!m_checks[i]->isChecked()) continue;
-        for (auto& s : m_curves[i]) {
-            yMin = std::min(yMin, s.v);
-            yMax = std::max(yMax, s.v);
+        const auto& src = m_paused ? m_history[i] : m_curves[i];
+        auto [b, e] = findRange(src);
+        for (auto it = b; it != e; ++it) {
+            yMin = std::min(yMin, it->v);
+            yMax = std::max(yMax, it->v);
         }
     }
     if (yMin >= yMax) { yMin -= 1; yMax += 1; }
@@ -114,11 +149,12 @@ void GraphWidget::paintEvent(QPaintEvent*) {
     yMax += yRange * 0.05f;
     yRange = yMax - yMin;
 
-    drawGrid(p, plot, yMin, yMax);
+    // Background + border
+    p.fillRect(plot, QColor(15, 15, 15));
+    p.setPen(QPen(m_paused ? QColor(80, 60, 20) : QColor(50, 50, 50), 1));
+    p.drawRect(plot);
 
-    // Draw curves
-    float tEnd   = m_elapsed;
-    float tStart = tEnd - WINDOW_SECS;
+    drawGrid(p, plot, yMin, yMax);
 
     auto toScreen = [&](float t, float v) -> QPointF {
         float px = plot.left() + (t - tStart) / WINDOW_SECS * plot.width();
@@ -126,12 +162,17 @@ void GraphWidget::paintEvent(QPaintEvent*) {
         return {px, py};
     };
 
+    // Draw curves
     for (int i = 0; i < NUM_CURVES; ++i) {
-        if (!m_checks[i]->isChecked() || m_curves[i].size() < 2) continue;
+        if (!m_checks[i]->isChecked()) continue;
+        const auto& src = m_paused ? m_history[i] : m_curves[i];
+        auto [b, e] = findRange(src);
+        if (std::distance(b, e) < 2) continue;
+
         p.setPen(QPen(m_colors[i], 1.5));
-        QPointF prev = toScreen(m_curves[i].front().t, m_curves[i].front().v);
-        for (size_t j = 1; j < m_curves[i].size(); ++j) {
-            QPointF cur = toScreen(m_curves[i][j].t, m_curves[i][j].v);
+        QPointF prev = toScreen(b->t, b->v);
+        for (auto it = std::next(b); it != e; ++it) {
+            QPointF cur = toScreen(it->t, it->v);
             p.drawLine(prev, cur);
             prev = cur;
         }
@@ -170,6 +211,34 @@ void GraphWidget::quatToEuler(float qw, float qx, float qy, float qz,
     float sinp = 2*(qw*qy - qz*qx);
     pitch = qRadiansToDegrees(std::abs(sinp) >= 1 ? std::copysign(M_PI/2, sinp) : std::asin(sinp));
     yaw   = qRadiansToDegrees(std::atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz)));
+}
+
+// ---------------------------------------------------------------------------
+// Pause / Play
+// ---------------------------------------------------------------------------
+
+void GraphWidget::pause() {
+    if (m_paused) return;
+    m_paused  = true;
+    m_viewEnd = m_elapsed;
+
+    // Scrollbar range: min = first full window can be shown (WINDOW_SECS),
+    // max = live edge at the moment of pause. Unit = 0.1 s.
+    int minVal = static_cast<int>(WINDOW_SECS * 10);
+    int maxVal = std::max(minVal, static_cast<int>(m_elapsed * 10));
+    m_scrollBar->blockSignals(true);
+    m_scrollBar->setRange(minVal, maxVal);
+    m_scrollBar->setValue(maxVal); // start at live edge
+    m_scrollBar->blockSignals(false);
+    m_scrollBar->setVisible(true);
+    update();
+}
+
+void GraphWidget::play() {
+    if (!m_paused) return;
+    m_paused = false;
+    m_scrollBar->setVisible(false);
+    update();
 }
 
 // ---------------------------------------------------------------------------

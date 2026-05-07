@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QCheckBox>
+#include <QScrollBar>
 #include <deque>
 #include <array>
 #include "backend/TelemetryState.h"
@@ -19,6 +20,10 @@ public:
     void pushAttitude(const AttitudeData& d);
     void pushGps     (const GpsData& d);
     void pushMtf01   (const Mtf01Data& d);
+
+    // Pause/resume live scrolling. While paused, data is still recorded.
+    void pause();
+    void play();
 
     // Export all session data to a CSV file (opens a file dialog).
     // PID values are written as comment lines at the top of the file.
@@ -42,15 +47,20 @@ private:
     // Rolling window used for display (trimmed to WINDOW_SECS)
     std::array<std::deque<Sample>, NUM_CURVES> m_curves;
 
-    // Full session history used for CSV export (never trimmed)
+    // Full session history used for CSV export and paused scrolling (never trimmed)
     std::array<std::deque<Sample>, NUM_CURVES> m_history;
 
     std::array<QCheckBox*, NUM_CURVES> m_checks{};
     std::array<QColor, NUM_CURVES>     m_colors;
     std::array<QString, NUM_CURVES>    m_labels;
 
-    float m_elapsed = 0.0f; // seconds since start
-    int   m_timerId = 0;
+    float      m_elapsed  = 0.0f;    // seconds since start
+    int        m_timerId  = 0;
+
+    // Pause state
+    bool        m_paused  = false;
+    float       m_viewEnd = 0.0f;    // end of the displayed window when paused (seconds)
+    QScrollBar* m_scrollBar = nullptr;
 
     // Latest raw values pushed by network callbacks
     float m_roll = 0, m_pitch = 0, m_yaw = 0;

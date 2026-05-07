@@ -125,23 +125,33 @@ void MainWindow::setupUi() {
     graphLayout->setContentsMargins(6, 6, 6, 6);
     graphLayout->setSpacing(4);
 
-    // Toolbar with export actions
-    auto* btnBar   = new QHBoxLayout();
+    // Toolbar with playback controls and export actions
+    auto* btnBar  = new QHBoxLayout();
+    auto* pauseBtn = new QPushButton("Pause",       graphTab);
+    auto* playBtn  = new QPushButton("Play",        graphTab);
     auto* csvBtn   = new QPushButton("Export CSV",  graphTab);
     auto* ssBtn    = new QPushButton("Screenshot",  graphTab);
+
     QString btnStyle = "QPushButton { background: #1a4a8a; color: white; border: 1px solid #2a6ac0; "
                        "padding: 4px 12px; font-size: 12px; border-radius: 3px; }"
                        "QPushButton:hover { background: #2a6ac0; }";
-    csvBtn->setStyleSheet(btnStyle);
-    ssBtn ->setStyleSheet(btnStyle);
-    csvBtn->setFixedHeight(28);
-    ssBtn ->setFixedHeight(28);
-    btnBar->addWidget(csvBtn);
-    btnBar->addWidget(ssBtn);
+    QString pauseStyle = "QPushButton { background: #7a4a00; color: white; border: 1px solid #c07000; "
+                         "padding: 4px 12px; font-size: 12px; border-radius: 3px; }"
+                         "QPushButton:hover { background: #c07000; }";
+    pauseBtn->setStyleSheet(pauseStyle);
+    playBtn ->setStyleSheet(btnStyle);
+    csvBtn  ->setStyleSheet(btnStyle);
+    ssBtn   ->setStyleSheet(btnStyle);
+    for (auto* b : {pauseBtn, playBtn, csvBtn, ssBtn}) {
+        b->setFixedHeight(28);
+        btnBar->addWidget(b);
+    }
     btnBar->addStretch(1);
     graphLayout->addLayout(btnBar);
     graphLayout->addWidget(m_graph);
 
+    connect(pauseBtn, &QPushButton::clicked, m_graph, &GraphWidget::pause);
+    connect(playBtn,  &QPushButton::clicked, m_graph, &GraphWidget::play);
     // Export CSV: pass current PID state to the graph so it can write the header
     connect(csvBtn, &QPushButton::clicked, this, [this]() {
         m_graph->exportCsv(m_state.pid());
