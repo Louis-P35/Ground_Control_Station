@@ -162,6 +162,11 @@ void MainWindow::setupUi() {
     });
     connect(ssBtn, &QPushButton::clicked, m_graph, &GraphWidget::saveScreenshot);
 
+    // Wire the Map PiP to the VideoWidget's QVideoSink.
+    // Both VideoWidget's QVideoWidget and the PiP subscribe to videoFrameChanged
+    // so they receive identical frames without opening the camera a second time.
+    m_map->setPipSink(m_video->videoSink());
+
     // --- Tab widget ---
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(false);

@@ -9,6 +9,9 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QPushButton;
 class QCheckBox;
+class QFrame;
+class QVideoWidget;
+class QVideoSink;
 
 // ---------------------------------------------------------------------------
 // MapWidget — satellite/street map view with real-time drone position overlay.
@@ -33,6 +36,12 @@ public:
 
     // Called from MainWindow::onGpsReceived (UI thread).
     void updatePosition(const GpsData& d);
+
+    // Wire the PiP overlay to the camera frame stream.
+    // Connects videoSink's videoFrameChanged to the PiP QVideoWidget's sink,
+    // so both VideoWidget and the PiP receive the same frames without a second camera.
+    // Call once from MainWindow after both VideoWidget and MapWidget are created.
+    void setPipSink(QVideoSink* sink);
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -90,6 +99,12 @@ private:
     QPushButton* m_zoomOutBtn  = nullptr;
     QPushButton* m_layerBtn    = nullptr;
     QCheckBox*   m_trailCheck  = nullptr;
+    QPushButton* m_pipBtn      = nullptr;
+
+    // PiP video overlay — bottom-left corner, shown on top of the map
+    QFrame*       m_pipFrame   = nullptr;
+    QVideoWidget* m_pipVideo   = nullptr;
+    bool          m_pipVisible = true;
 
     static constexpr int TILE_SIZE   = 256;
     static constexpr int MIN_ZOOM    = 2;

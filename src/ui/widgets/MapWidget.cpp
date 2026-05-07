@@ -6,12 +6,16 @@
 #include <QResizeEvent>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QFrame>
+#include <QVBoxLayout>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QVideoWidget>
+#include <QVideoSink>
 #include <algorithm>
 #include <cmath>
 
@@ -101,6 +105,36 @@ MapWidget::MapWidget(QWidget* parent) : QWidget(parent) {
         "border-radius: 2px; background: #333; }"
         "QCheckBox::indicator:checked { background: #c83232; border-color: #e05050; }");
     connect(m_trailCheck, &QCheckBox::toggled, this, [this](bool) { update(); });
+
+    // Video PiP toggle button (checkable: blue = visible, dark = hidden)
+    m_pipBtn = new QPushButton("Video", this);
+    m_pipBtn->setCheckable(true);
+    m_pipBtn->setChecked(true);
+    m_pipBtn->setFixedSize(76, 28);
+    m_pipBtn->setStyleSheet(
+        "QPushButton { background: rgba(20,20,20,210); color: #aaa; "
+        "border: 1px solid #555; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
+        "QPushButton:checked { background: rgba(25,70,150,220); color: white; border-color: #4a90d0; }"
+        "QPushButton:hover { background: rgba(60,60,60,230); }");
+    connect(m_pipBtn, &QPushButton::toggled, this, [this](bool checked) {
+        m_pipVisible = checked;
+        if (m_pipFrame) m_pipFrame->setVisible(checked);
+    });
+
+    // PiP frame — black background + white border around the QVideoWidget
+    m_pipFrame = new QFrame(this);
+    m_pipFrame->setStyleSheet(
+        "QFrame { background: black; border: 2px solid rgba(220,220,220,160); border-radius: 4px; }");
+    auto* pipLayout = new QVBoxLayout(m_pipFrame);
+    pipLayout->setContentsMargins(2, 2, 2, 2);
+    pipLayout->setSpacing(0);
+    m_pipVideo = new QVideoWidget(m_pipFrame);
+    m_pipVideo->setStyleSheet("background: black; border: none;");
+    pipLayout->addWidget(m_pipVideo);
+    m_pipFrame->setFixedSize(320, 180);
+    // Hidden until setPipSession() is called — no camera session wired yet
+    m_pipFrame->hide();
+    m_pipBtn->hide();
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +160,18 @@ void MapWidget::updatePosition(const GpsData& d) {
     if (m_follow && m_hasFix)
         centerOnDrone();
     update();
+}
+
+void MapWidget::setPipSink(QVideoSink* sink) {
+    if (!sink || !m_pipVideo) return;
+    // Push every incoming frame to the PiP QVideoWidget's internal sink.
+    // This mirrors what VideoWidget does for its own QVideoWidget, giving both
+    // consumers the same frames without opening the camera device a second time.
+    connect(sink, &QVideoSink::videoFrameChanged,
+            m_pipVideo->videoSink(), &QVideoSink::setVideoFrame);
+    m_pipFrame->setVisible(m_pipVisible);
+    m_pipBtn->show();
+    repositionOverlay();
 }
 
 void MapWidget::centerOnDrone() {
@@ -322,18 +368,27 @@ void MapWidget::resizeEvent(QResizeEvent* e) {
 }
 
 void MapWidget::repositionOverlay() {
-    // Stack controls in the top-right corner
+    // Stack controls in the top-right corner (36 px steps: 28 px button + 8 gap)
     int r = width() - 8;
     m_followBtn ->move(r - m_followBtn->width(),  8);
     m_zoomInBtn ->move(r - m_zoomInBtn->width() - m_zoomOutBtn->width() - 4, 44);
     m_zoomOutBtn->move(r - m_zoomOutBtn->width(), 44);
     m_trailCheck->move(r - m_trailCheck->width(), 80);
     m_layerBtn  ->move(r - m_layerBtn->width(),   116);
+    m_pipBtn    ->move(r - m_pipBtn->width(),      152);
+
+    // PiP frame: bottom-left corner, above the attribution strip (16 px) + margin
+    if (m_pipFrame)
+        m_pipFrame->move(8, height() - m_pipFrame->height() - 24);
+
+    // Ensure overlay widgets paint on top of the map
     m_followBtn ->raise();
     m_zoomInBtn ->raise();
     m_zoomOutBtn->raise();
     m_trailCheck->raise();
     m_layerBtn  ->raise();
+    m_pipBtn    ->raise();
+    if (m_pipFrame) m_pipFrame->raise();
 }
 
 // ---------------------------------------------------------------------------

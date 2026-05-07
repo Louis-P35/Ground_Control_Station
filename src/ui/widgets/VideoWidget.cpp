@@ -5,6 +5,7 @@
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
 #include <QVideoWidget>
+#include <QVideoSink>
 #include <QComboBox>
 #include <QLabel>
 #include <QPushButton>
@@ -58,7 +59,14 @@ VideoWidget::VideoWidget(QWidget* parent) : QWidget(parent) {
 
     // --- Capture session (persists across camera switches) ---
     m_session = new QMediaCaptureSession(this);
-    m_session->setVideoOutput(m_video);
+
+    // Use a QVideoSink as the session's sole output so that multiple consumers
+    // (this QVideoWidget + the MapWidget PiP) can subscribe to the same frames.
+    // Each subscriber connects videoFrameChanged → its own QVideoSink::setVideoFrame.
+    m_sink = new QVideoSink(this);
+    m_session->setVideoOutput(m_sink);
+    connect(m_sink, &QVideoSink::videoFrameChanged,
+            m_video->videoSink(), &QVideoSink::setVideoFrame);
 
     // --- Device change notifications ---
     m_devices = new QMediaDevices(this);
