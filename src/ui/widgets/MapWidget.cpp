@@ -79,6 +79,17 @@ MapWidget::MapWidget(QWidget* parent) : QWidget(parent) {
     connect(m_zoomOutBtn, &QPushButton::clicked, this,
             [this]() { applyZoom(m_zoom - 1, {width() / 2.0, height() / 2.0}); });
 
+    // Layer toggle button
+    m_layerBtn = mkBtn("Satellite");
+    m_layerBtn->setFixedWidth(76);
+    connect(m_layerBtn, &QPushButton::clicked, this, [this]() {
+        m_satellite = !m_satellite;
+        m_layerBtn->setText(m_satellite ? "Street map" : "Satellite");
+        // Cancel pending requests for the old layer and reload visible tiles
+        cancelPendingRequests();
+        update();
+    });
+
     // Trail toggle checkbox
     m_trailCheck = new QCheckBox("Trail", this);
     m_trailCheck->setChecked(true);
@@ -234,10 +245,12 @@ void MapWidget::paintEvent(QPaintEvent*) {
     p.setPen(Qt::white);
     p.drawText(hudRect, Qt::AlignVCenter | Qt::AlignLeft, hud);
 
-    // Attribution (OSM requires it)
+    // Attribution — both OSM and Esri require it
     QFont af; af.setPointSize(7);
     p.setFont(af);
-    QString attr = "© OpenStreetMap contributors";
+    QString attr = m_satellite
+        ? "© Esri, DigitalGlobe, GeoEye, Earthstar Geographics & GIS community"
+        : "© OpenStreetMap contributors";
     QRect attrRect(0, H - 16, W, 16);
     p.fillRect(attrRect, QColor(0, 0, 0, 120));
     p.setPen(QColor(200, 200, 200));
@@ -315,17 +328,20 @@ void MapWidget::repositionOverlay() {
     m_zoomInBtn ->move(r - m_zoomInBtn->width() - m_zoomOutBtn->width() - 4, 44);
     m_zoomOutBtn->move(r - m_zoomOutBtn->width(), 44);
     m_trailCheck->move(r - m_trailCheck->width(), 80);
+    m_layerBtn  ->move(r - m_layerBtn->width(),   116);
     m_followBtn ->raise();
     m_zoomInBtn ->raise();
     m_zoomOutBtn->raise();
     m_trailCheck->raise();
+    m_layerBtn  ->raise();
 }
 
 // ---------------------------------------------------------------------------
 // Tile fetching
 // ---------------------------------------------------------------------------
 QString MapWidget::tileKey(int z, int x, int y) const {
-    return QString("%1/%2/%3").arg(z).arg(x).arg(y);
+    // Prefix with layer name so OSM and satellite tiles never collide in the cache
+    return QString("%1/%2/%3/%4").arg(m_satellite ? "sat" : "osm").arg(z).arg(x).arg(y);
 }
 
 void MapWidget::cancelPendingRequests() {
@@ -345,9 +361,12 @@ void MapWidget::fetchTile(int z, int x, int y) {
     // Throttle concurrent requests to avoid overwhelming the tile server
     if (m_pendingReplies.size() >= MAX_INFLIGHT) return;
 
-    QUrl url(QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(z).arg(x).arg(y));
+    // Esri World Imagery uses {z}/{y}/{x} order (note: y before x)
+    QUrl url = m_satellite
+        ? QUrl(QString("https://server.arcgisonline.com/ArcGIS/rest/services/"
+                       "World_Imagery/MapServer/tile/%1/%2/%3").arg(z).arg(y).arg(x))
+        : QUrl(QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(z).arg(x).arg(y));
     QNetworkRequest req(url);
-    // OSM tile usage policy requires a meaningful User-Agent header
     req.setHeader(QNetworkRequest::UserAgentHeader, "GCS/1.0 (drone-monitoring; educational)");
     req.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
                      QNetworkRequest::PreferCache);

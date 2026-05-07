@@ -416,10 +416,11 @@ Satellite/street map view occupying the full **Map** tab. Tiles are fetched from
 - **[⊕ Follow]** button — re-enables auto-centering on the drone
 - **[+] / [−]** buttons — zoom in / zoom out (zoom range: 2–19)
 - **Trail** checkbox — show/hide the GPS trail
+- **[Satellite] / [Street map]** button — toggle between OSM street map and Esri World Imagery satellite photos; pending requests for the previous layer are cancelled immediately on switch
 
 **Technical notes:**
 - In-flight tile requests for the previous zoom level are cancelled immediately on zoom change to free HTTP slots for the new level (fixes black-tile flicker on rapid zoom)
-- Fetched tiles are always stored in the in-memory cache regardless of current zoom level; the key encodes `z/x/y` so there is no cross-zoom conflict
+- Fetched tiles are always stored in the in-memory cache regardless of current zoom level; the key encodes `layer/z/x/y` so OSM and satellite tiles never collide
 - Max 6 concurrent HTTP tile requests; max 512 tiles in memory
 - OSM attribution displayed as required by the tile usage policy
 

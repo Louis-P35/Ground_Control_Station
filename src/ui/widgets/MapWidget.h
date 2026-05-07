@@ -81,10 +81,14 @@ private:
     // GPS trail — stores (lat, lon) pairs, capped at MAX_TRAIL entries
     QVector<QPointF> m_trail;
 
+    // Tile layer
+    bool m_satellite = false; // false = OSM street map, true = Esri satellite imagery
+
     // Overlay controls (absolute-positioned children, always on top)
     QPushButton* m_followBtn   = nullptr;
     QPushButton* m_zoomInBtn   = nullptr;
     QPushButton* m_zoomOutBtn  = nullptr;
+    QPushButton* m_layerBtn    = nullptr;
     QCheckBox*   m_trailCheck  = nullptr;
 
     static constexpr int TILE_SIZE   = 256;
