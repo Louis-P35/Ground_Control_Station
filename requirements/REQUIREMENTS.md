@@ -367,8 +367,14 @@ Read-only status panel displaying drone health information:
 
 **Toolbar buttons (Graph tab only):**
 
+- **Pause** — freezes the graph display at the current live edge. Data recording continues in the background. The title and plot border turn amber. A horizontal scrollbar appears below the plot.
+- **Play** — resumes live scrolling; the scrollbar is hidden.
+- **Scrollbar** (visible only when paused) — allows scrubbing back through the full session history.
+  - Unit: 0.1 s. Page step: 10 s (one full window). Single step: 1 s.
+  - Range: from the first full window (10 s into the session) to the instant of pause.
+  - The plot Y-axis auto-scales to the visible time slice.
 - **Export CSV** — exports the full session history (all samples since launch) to a `.csv` file via a file dialog.
-  - Comment lines (`#`) at the top of the file contain all 9 PID axis values (Rate/Attitude/Position, Kp/Ki/Kd each) at the time of export.
+  - Comment lines (`#`) at the top contain all 9 PID axis values (Rate/Attitude/Position, Kp/Ki/Kd) at the time of export.
   - Data columns: `timestamp_s, roll_deg, pitch_deg, yaw_deg, alt_m, gyr_x_dps, gyr_y_dps, gyr_z_dps, flow_quality`
   - Default filename: `telemetry_YYYYMMDD_HHmmss.csv`
 - **Screenshot** — renders the graph widget to a `.png` file via a file dialog.
