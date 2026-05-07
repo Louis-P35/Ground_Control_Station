@@ -7,6 +7,7 @@ class QMediaDevices;
 class QVideoWidget;
 class QComboBox;
 class QLabel;
+class QPushButton;
 
 // ---------------------------------------------------------------------------
 // VideoWidget — displays a live video feed from any V4L2 / DirectShow device
@@ -32,6 +33,7 @@ private:
     QMediaCaptureSession* m_session  = nullptr;
     QVideoWidget*         m_video    = nullptr;
     QMediaDevices*        m_devices  = nullptr;
-    QComboBox*            m_combo    = nullptr;
-    QLabel*               m_status   = nullptr;
+    QComboBox*            m_combo      = nullptr;
+    QLabel*               m_status     = nullptr;
+    QPushButton*          m_refreshBtn = nullptr;
 };

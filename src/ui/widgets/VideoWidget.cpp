@@ -9,7 +9,6 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGroupBox>
 
 VideoWidget::VideoWidget(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
@@ -35,8 +34,17 @@ VideoWidget::VideoWidget(QWidget* parent) : QWidget(parent) {
     m_status = new QLabel(this);
     m_status->setStyleSheet("color: #666; font-size: 11px; font-style: italic;");
 
+    // Refresh button — lets the user re-enumerate devices after granting permission
+    m_refreshBtn = new QPushButton("Refresh", this);
+    m_refreshBtn->setFixedHeight(26);
+    m_refreshBtn->setStyleSheet(
+        "QPushButton { background: #333; color: #ccc; border: 1px solid #555; "
+        "padding: 2px 10px; font-size: 11px; border-radius: 3px; }"
+        "QPushButton:hover { background: #444; }");
+
     toolbar->addWidget(camLabel);
     toolbar->addWidget(m_combo, 1);
+    toolbar->addWidget(m_refreshBtn);
     toolbar->addWidget(m_status);
     mainLayout->addLayout(toolbar);
 
@@ -58,9 +66,11 @@ VideoWidget::VideoWidget(QWidget* parent) : QWidget(parent) {
 
     // --- Combo selection → camera switch ---
     connect(m_combo, &QComboBox::currentIndexChanged, this, [this](int idx) {
-        if (idx >= 0)
+        if (idx >= 0 && m_combo->itemData(idx).isValid())
             startCamera(m_combo->itemData(idx));
     });
+
+    connect(m_refreshBtn, &QPushButton::clicked, this, &VideoWidget::populateCameraList);
 
     populateCameraList();
 }
@@ -75,7 +85,9 @@ VideoWidget::~VideoWidget() {
 
 void VideoWidget::populateCameraList() {
     // Remember current selection by device ID so we can restore it after refresh
-    QString currentId = m_combo->currentData().value<QCameraDevice>().id();
+    QString currentId = m_combo->currentData().isValid()
+                        ? m_combo->currentData().value<QCameraDevice>().id()
+                        : QString();
 
     m_combo->blockSignals(true);
     m_combo->clear();
@@ -88,7 +100,8 @@ void VideoWidget::populateCameraList() {
 
     if (cameras.isEmpty()) {
         m_combo->addItem("No camera detected");
-        m_status->setText("Plug in a camera or USB video receiver");
+        m_status->setText("No camera found — check Windows Privacy Settings → Camera");
+        m_status->setStyleSheet("color: #ff8844; font-size: 11px;");
         stopCamera();
         return;
     }
@@ -99,8 +112,12 @@ void VideoWidget::populateCameraList() {
         if (cameras[i].id() == currentId) { restoreIdx = i; break; }
     }
 
-    // Setting currentIndex emits currentIndexChanged → startCamera
     m_combo->setCurrentIndex(restoreIdx);
+
+    // When items are added while signals are blocked, Qt silently sets
+    // currentIndex to 0. Calling setCurrentIndex(0) again won't emit
+    // currentIndexChanged, so we trigger startCamera() explicitly.
+    startCamera(m_combo->itemData(restoreIdx));
 }
 
 // ---------------------------------------------------------------------------
