@@ -56,7 +56,8 @@ gcs/
 │       │   ├── StatusWidget.h / .cpp
 │       │   ├── PidConfigWidget.h / .cpp
 │       │   ├── GraphWidget.h / .cpp
-│       │   └── TerminalWidget.h / .cpp
+│       │   ├── TerminalWidget.h / .cpp
+│       │   └── MapWidget.h / .cpp
 ```
 
 ### 3.3 Threading
@@ -248,7 +249,7 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ### 5.1 General Layout
 
-- **Single window with two tabs, no menu bar**
+- **Single window with three tabs, no menu bar**
 - Dark theme (dark background, light text)
 - Each widget has a visible title/label
 
@@ -262,6 +263,8 @@ Row 2: [terminal          x2              ] [PID config            x2     ]
 ```
 
 **Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
+
+**Tab 2 — Map**: the satellite map widget (`MapWidget`) occupies the full tab area.
 
 ### 5.2 Widget List
 
@@ -389,6 +392,36 @@ Read-only status panel displaying drone health information:
 - Color-coded by level: DEBUG=gray, INFO=white, WARN=yellow, ERROR=red
 - Auto-scrolls to latest message
 - **Clear** button to reset content
+
+---
+
+#### W11 — Map (`MapWidget`)
+
+Satellite/street map view occupying the full **Map** tab. Tiles are fetched from OpenStreetMap (XYZ tile scheme, Web Mercator / EPSG:3857 projection) and cached on disk (200 MB) across sessions via `QNetworkDiskCache`.
+
+**Drone overlay:**
+- Blue circle with directional arrow indicating GPS heading (0° = north)
+- Arrow rotates in real-time from `PktGps` heading field
+- "Waiting for GPS fix…" message shown when `fix_type < 1`
+
+**GPS trail:**
+- Red polyline tracing the drone's path since session start
+- Stored as (lat, lon) pairs, capped at 8 000 points (~13 min at 10 Hz)
+- Duplicates filtered out (point only added when position actually changes)
+- Toggled by the **Trail** checkbox overlay (checked by default)
+
+**Interactions:**
+- **Mouse wheel** — zoom in/out anchored on cursor position
+- **Left drag** — pan map; disables follow mode
+- **[⊕ Follow]** button — re-enables auto-centering on the drone
+- **[+] / [−]** buttons — zoom in / zoom out (zoom range: 2–19)
+- **Trail** checkbox — show/hide the GPS trail
+
+**Technical notes:**
+- In-flight tile requests for the previous zoom level are cancelled immediately on zoom change to free HTTP slots for the new level (fixes black-tile flicker on rapid zoom)
+- Fetched tiles are always stored in the in-memory cache regardless of current zoom level; the key encodes `z/x/y` so there is no cross-zoom conflict
+- Max 6 concurrent HTTP tile requests; max 512 tiles in memory
+- OSM attribution displayed as required by the tile usage policy
 
 ---
 

@@ -18,6 +18,7 @@ class StatusWidget;
 class PidConfigWidget;
 class GraphWidget;
 class TerminalWidget;
+class MapWidget;
 
 // ---------------------------------------------------------------------------
 // MainWindow — single application window.
@@ -67,6 +68,7 @@ private:
     PidConfigWidget* m_pid      = nullptr;
     GraphWidget*     m_graph    = nullptr;
     TerminalWidget*  m_terminal = nullptr;
+    MapWidget*       m_map      = nullptr;
 
     // Status bar labels
     QLabel* m_statusConn    = nullptr;

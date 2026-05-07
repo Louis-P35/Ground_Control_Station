@@ -17,6 +17,7 @@
 #include "widgets/PidConfigWidget.h"
 #include "widgets/GraphWidget.h"
 #include "widgets/TerminalWidget.h"
+#include "widgets/MapWidget.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Ground Control Station");
@@ -88,6 +89,7 @@ void MainWindow::setupUi() {
     m_pid      = new PidConfigWidget(this);
     m_graph    = new GraphWidget(this);
     m_terminal = new TerminalWidget(this);
+    m_map      = new MapWidget(this);
 
     // --- Tab 0: Dashboard ---
     auto* dashTab = new QWidget(this);
@@ -163,6 +165,9 @@ void MainWindow::setupUi() {
     m_tabs->setDocumentMode(false);
     m_tabs->addTab(dashTab,  "Dashboard");
     m_tabs->addTab(graphTab, "Graph");
+
+    // --- Tab 2: Map — MapWidget manages its own overlay buttons internally ---
+    m_tabs->addTab(m_map, "Map");
 
     setCentralWidget(m_tabs);
 }
@@ -248,6 +253,7 @@ void MainWindow::onGpsReceived(GpsData d) {
     m_gps->updateData(d);
     m_compass->setHeading(d.heading_deg);
     m_graph->pushGps(d);
+    m_map->updatePosition(d);
 }
 
 void MainWindow::onMtf01Received(Mtf01Data d) {
