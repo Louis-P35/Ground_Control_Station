@@ -127,17 +127,41 @@ The FC is the **SPI master**. The ESP32 is the **SPI slave**.
 
 ## 5. Software Architecture
 
-### 5.1 Tasks (FreeRTOS)
+### 5.1 Execution Model — Bare Metal C++
 
-| Task | Core | Priority | Role |
-|------|------|----------|------|
-| `task_spi`     | 1 | High   | SPI slave ISR + ring buffer drain; pushes FC telemetry to queues |
-| `task_gps`     | 0 | Normal | NMEA/UBX parse; pushes `GpsData` to queue |
-| `task_mtf01`   | 0 | Normal | MTF-01 UART parse; pushes `Mtf01Data` to queue |
-| `task_sbus`    | 0 | Normal | S.Bus frame decode; pushes `RadioData` to queue |
-| `task_baro`    | 0 | Normal | I2C poll at 10 Hz; pushes `BaroData` to queue |
-| `task_udp_tx`  | 0 | Normal | Assembles packets from all queues, sends UDP datagrams at up to 100 Hz |
-| `task_udp_rx`  | 0 | Normal | Receives UDP from GCS, forwards commands to FC via SPI MISO buffer |
+The firmware is written in **C++17, bare metal** — no FreeRTOS, no OS abstraction.
+Framework: **Arduino Core for ESP32** (provides `setup()` / `loop()`, hardware drivers, WiFi stack).
+
+All concurrency is handled with:
+- **Hardware interrupts (ISR)** — SPI slave CS edge, UART RX for GPS / MTF-01 / S.Bus
+- **Ring buffers** — ISRs write raw bytes; `loop()` drains and parses
+- **Non-blocking polling** — each driver exposes a `update()` method called every loop iteration; no busy-wait, no blocking I/O
+
+`loop()` executes at the fastest possible rate (~100 Hz target). Each subsystem is called in sequence:
+
+```
+loop()
+├── spi_slave.update()     // drain SPI RX ring buffer, parse FC frame
+├── gps.update()           // drain GPS UART ring buffer, parse NMEA/UBX
+├── mtf01.update()         // drain MTF-01 UART ring buffer
+├── sbus.update()          // drain S.Bus UART ring buffer, decode frame
+├── baro.update()          // I2C poll if 100 ms elapsed (10 Hz)
+├── udp_rx.update()        // receive pending GCS commands (non-blocking)
+└── udp_tx.update()        // send pending telemetry packets (rate-limited per type)
+```
+
+### 5.2 Module List
+
+| Module | File | Role |
+|--------|------|------|
+| `SpiSlave`   | `spi_slave.h/.cpp`  | SPI slave ISR + frame parser; exposes latest FC telemetry |
+| `GpsReader`  | `gps_reader.h/.cpp` | UART2 NMEA/UBX parser; exposes `GpsData` |
+| `Mtf01Reader`| `mtf01.h/.cpp`      | UART1 binary parser; exposes `Mtf01Data` |
+| `SbusReader` | `sbus.h/.cpp`       | UART0 inverted, S.Bus frame decoder; exposes `RadioData` |
+| `BaroReader` | `baro.h/.cpp`       | I2C poller (BMP280/388/MS5611); exposes `BaroData` |
+| `UdpTx`      | `udp_tx.h/.cpp`     | Rate-limited packet builder and sender |
+| `UdpRx`      | `udp_rx.h/.cpp`     | Non-blocking command receiver; writes pending command to SPI MISO buffer |
+| `Config`     | `config.h/.cpp`     | NVS read/write for all configurable parameters |
 
 ### 5.2 Packet Send Rates
 
@@ -203,13 +227,6 @@ The following parameters must be configurable without recompiling (stored in NVS
 - The WiFi stack must not starve sensor tasks — use FreeRTOS task priorities accordingly
 - Watchdog timer enabled: reset if `task_udp_tx` stalls for more than 2 s
 - Serial monitor (USB UART) outputs human-readable status at 1 Hz for debugging
-- Firmware built with Arduino framework + ESP32 Arduino Core (or ESP-IDF — TBD)
+- Firmware built with **Arduino Core for ESP32**, C++17, bare metal (no FreeRTOS)
 
 ---
-
-## 8. Out of Scope (for now)
-
-- OTA firmware update
-- Flight controller attitude computation (done on the FC, not the ESP32)
-- Data logging to SD card
-- Encrypted UDP
