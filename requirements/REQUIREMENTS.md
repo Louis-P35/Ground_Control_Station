@@ -270,13 +270,14 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ```
 Col:   0              1              2              3
-Row 0: [3D view (rows 0-1, cols 0-1)     ] [joystick    ] [motors    ]
-Row 1: [3D view                          ] [GPS          ] [motors    ]
-Row 2: [terminal     x2                  ] [baro|compass|status|mtf01]
+Row 0: [3D (r0-1,c0)] [joystick (r0-1)] [compass (r0-1)] [motors (r0-1)]
+Row 1: [3D           ] [joystick       ] [compass       ] [motors       ]
+Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 ```
 
-The 3D view spans a 2×2 cell block for a large real-time visualization.
-Row 2 right half is a horizontal info bar grouping barometer, compass, status, and MTF-01 side by side.
+The 3D view spans rows 0-1, col 0 (same width as original, double height) for a taller real-time visualization without taking horizontal space from the other widgets.
+Joystick and compass each span the same 2 rows.
+Row 2 right half is a horizontal info bar grouping barometer, GPS, status, and MTF-01 side by side.
 
 **Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
 

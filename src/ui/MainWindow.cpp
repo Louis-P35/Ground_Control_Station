@@ -73,9 +73,9 @@ MainWindow::~MainWindow() {
 //
 //  Tab 0 "Dashboard":
 //    Col:   0              1              2              3
-//    Row 0: [3D view (rows 0-1, cols 0-1)     ] [joystick    ] [motors    ]
-//    Row 1: [3D view                          ] [GPS          ] [motors    ]
-//    Row 2: [terminal     x2                  ] [baro|compass|status|mtf01]
+//    Row 0: [3D (r0-1,c0)] [joystick (r0-1)] [compass (r0-1)] [motors (r0-1)]
+//    Row 1: [3D           ] [joystick       ] [compass       ] [motors       ]
+//    Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 //
 //  Tab 1 "Graph":    Full-window graph widget
 //  Tab 2 "Map":      Full-window map widget
@@ -103,22 +103,21 @@ void MainWindow::setupUi() {
     grid->setSpacing(6);
     grid->setContentsMargins(6, 6, 6, 6);
 
-    // Rows 0-1: 3D view spans 2 rows × 2 cols for a larger display area
-    grid->addWidget(m_drone3d,  0, 0, 2, 2);
-    grid->addWidget(m_joystick, 0, 2);
+    // Rows 0-1, col 0: 3D view — taller than original but same width (1 col).
+    // Joystick and compass each span the same 2 rows alongside it.
+    grid->addWidget(m_drone3d,  0, 0, 2, 1);
+    grid->addWidget(m_joystick, 0, 1, 2, 1);
+    grid->addWidget(m_compass,  0, 2, 2, 1); // swapped: compass replaces GPS here
     grid->addWidget(m_motor,    0, 3, 2, 1);
 
-    // Row 1: GPS alongside the 3D view
-    grid->addWidget(m_gps, 1, 2);
-
-    // Row 2: terminal (left half) + compact info bar (right half)
-    // The info bar groups barometer, compass, status, and MTF-01 side by side.
+    // Row 2: terminal (left half) + info bar (right half).
+    // GPS is now in the info bar (swapped with compass).
     auto* infoBar   = new QWidget(dashTab);
     auto* infoHBox  = new QHBoxLayout(infoBar);
     infoHBox->setContentsMargins(0, 0, 0, 0);
     infoHBox->setSpacing(4);
     infoHBox->addWidget(m_barometer);
-    infoHBox->addWidget(m_compass);
+    infoHBox->addWidget(m_gps);     // swapped: GPS replaces compass here
     infoHBox->addWidget(m_status);
     infoHBox->addWidget(m_mtf01);
 
@@ -130,10 +129,10 @@ void MainWindow::setupUi() {
     grid->setColumnStretch(2, 2);
     grid->setColumnStretch(3, 2);
 
-    // Rows 0-1 get more height for the 3D view; row 2 is the compact info row.
-    grid->setRowStretch(0, 3);
-    grid->setRowStretch(1, 3);
-    grid->setRowStretch(2, 2);
+    // Rows 0-1 hold the main widgets; row 2 (terminal) gets more vertical space.
+    grid->setRowStretch(0, 2);
+    grid->setRowStretch(1, 2);
+    grid->setRowStretch(2, 3);
 
     // --- Tab 1: Graph ---
     auto* graphTab = new QWidget(this);
