@@ -269,11 +269,14 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 **Tab 0 — Dashboard**: all monitoring widgets arranged in a 4-column grid:
 
 ```
-Col:   0 (3D/status)   1 (compass/mtf01)   2 (joystick/gps)   3 (motors)
-Row 0: [3D view      ] [compass           ] [joystick         ] [motors   ]
-Row 1: [status       ] [MTF-01            ] [GPS              ] [motors   ]
-Row 2: [terminal          x2              ] [barometer             x2     ]
+Col:   0              1              2              3
+Row 0: [3D view (rows 0-1, cols 0-1)     ] [joystick    ] [motors    ]
+Row 1: [3D view                          ] [GPS          ] [motors    ]
+Row 2: [terminal     x2                  ] [baro|compass|status|mtf01]
 ```
+
+The 3D view spans a 2×2 cell block for a large real-time visualization.
+Row 2 right half is a horizontal info bar grouping barometer, compass, status, and MTF-01 side by side.
 
 **Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
 
