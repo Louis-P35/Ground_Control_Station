@@ -15,6 +15,7 @@
 #include "widgets/StatusWidget.h"
 #include "widgets/StatusWidget.h"
 #include "widgets/PidConfigWidget.h"
+#include "widgets/BarometerWidget.h"
 #include "widgets/GraphWidget.h"
 #include "widgets/TerminalWidget.h"
 #include "widgets/MapWidget.h"
@@ -68,16 +69,18 @@ MainWindow::~MainWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// UI layout — two tabs:
+// UI layout:
 //
 //  Tab 0 "Dashboard":
 //    Col:   0 (3D/status)   1 (compass/mtf01)   2 (joystick/gps)   3 (motors)
 //    Row 0: [3D view      ] [compass           ] [joystick         ] [motors   ]
 //    Row 1: [status       ] [MTF-01            ] [GPS              ] [motors   ]
-//    Row 2: [terminal          x2              ] [PID config            x2     ]
+//    Row 2: [terminal          x2              ] [barometer             x2     ]
 //
-//  Tab 1 "Graph":
-//    Full-window graph widget
+//  Tab 1 "Graph":    Full-window graph widget
+//  Tab 2 "Map":      Full-window map widget
+//  Tab 3 "Video":    Full-window video feed
+//  Tab 4 "Settings": PID configuration
 // ---------------------------------------------------------------------------
 void MainWindow::setupUi() {
     m_drone3d  = new DroneWidget3D(this);
@@ -87,8 +90,9 @@ void MainWindow::setupUi() {
     m_gps      = new GpsWidget(this);
     m_motor    = new MotorWidget(this);
     m_status   = new StatusWidget(this);
-    m_pid      = new PidConfigWidget(this);
-    m_graph    = new GraphWidget(this);
+    m_pid        = new PidConfigWidget(this);
+    m_barometer  = new BarometerWidget(this);
+    m_graph      = new GraphWidget(this);
     m_terminal = new TerminalWidget(this);
     m_map      = new MapWidget(this);
     m_video    = new VideoWidget(this);
@@ -110,9 +114,9 @@ void MainWindow::setupUi() {
     grid->addWidget(m_mtf01,  1, 1);
     grid->addWidget(m_gps,    1, 2);
 
-    // Row 2: terminal (left half), PID config (right half)
-    grid->addWidget(m_terminal, 2, 0, 1, 2);
-    grid->addWidget(m_pid,      2, 2, 1, 2);
+    // Row 2: terminal (left half), barometer (right half)
+    grid->addWidget(m_terminal,  2, 0, 1, 2);
+    grid->addWidget(m_barometer, 2, 2, 1, 2);
 
     grid->setColumnStretch(0, 2);
     grid->setColumnStretch(1, 2);
@@ -167,17 +171,28 @@ void MainWindow::setupUi() {
     // so they receive identical frames without opening the camera a second time.
     m_map->setPipSink(m_video->videoSink());
 
+    // --- Tab 4: Settings — PID configuration ---
+    auto* settingsTab = new QWidget(this);
+    auto* settingsLayout = new QVBoxLayout(settingsTab);
+    settingsLayout->setContentsMargins(12, 12, 12, 12);
+    settingsLayout->setSpacing(8);
+    settingsLayout->addWidget(m_pid);
+    settingsLayout->addStretch(1);
+
     // --- Tab widget ---
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(false);
-    m_tabs->addTab(dashTab,  "Dashboard");
-    m_tabs->addTab(graphTab, "Graph");
+    m_tabs->addTab(dashTab,      "Dashboard");
+    m_tabs->addTab(graphTab,     "Graph");
 
     // --- Tab 2: Map — MapWidget manages its own overlay buttons internally ---
-    m_tabs->addTab(m_map, "Map");
+    m_tabs->addTab(m_map,        "Map");
 
     // --- Tab 3: Video — live feed from a USB camera or video receiver ---
-    m_tabs->addTab(m_video, "Video");
+    m_tabs->addTab(m_video,      "Video");
+
+    // --- Tab 4: Settings — PID tuning parameters ---
+    m_tabs->addTab(settingsTab,  "Settings");
 
     setCentralWidget(m_tabs);
 }
@@ -223,6 +238,8 @@ void MainWindow::connectSignals() {
             this,   &MainWindow::onStatusReceived,          Qt::QueuedConnection);
     connect(parser, &PacketParser::pidReceived,
             this,   &MainWindow::onPidReceived,             Qt::QueuedConnection);
+    connect(parser, &PacketParser::baroReceived,
+            this,   &MainWindow::onBaroReceived,            Qt::QueuedConnection);
     connect(parser, &PacketParser::logReceived,
             this,   &MainWindow::onLogReceived,             Qt::QueuedConnection);
 
@@ -287,6 +304,11 @@ void MainWindow::onStatusReceived(StatusData d) {
 void MainWindow::onPidReceived(PidData d) {
     m_state.updatePid(d);
     m_pid->updatePid(d);
+}
+
+void MainWindow::onBaroReceived(BaroData d) {
+    m_state.updateBaro(d);
+    m_barometer->updateData(d);
 }
 
 void MainWindow::onLogReceived(uint8_t level, QString text) {

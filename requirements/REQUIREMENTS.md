@@ -55,6 +55,7 @@ gcs/
 │       │   ├── MotorWidget.h / .cpp
 │       │   ├── StatusWidget.h / .cpp
 │       │   ├── PidConfigWidget.h / .cpp
+│       │   ├── BarometerWidget.h / .cpp
 │       │   ├── GraphWidget.h / .cpp
 │       │   ├── TerminalWidget.h / .cpp
 │       │   └── MapWidget.h / .cpp
@@ -101,6 +102,7 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x05` | Status (battery, FSM state, motors) | 10 Hz |
 | `0x06` | PID values | Streamed |
 | `0x07` | Log / terminal text | On event |
+| `0x08` | Barometer (pressure, temperature, altitude) | 10 Hz |
 
 #### 0x01 — Attitude
 ```cpp
@@ -194,6 +196,17 @@ struct PktLog {
 };
 ```
 
+#### 0x08 — Barometer
+```cpp
+struct PktBaro {
+    PacketHeader header;
+    float pressure_pa;      // Atmospheric pressure in Pascals
+    float temperature_c;    // Temperature in Celsius
+    float altitude_m;       // Barometric altitude in meters (derived from pressure)
+    uint16_t crc;
+};
+```
+
 ### 4.3 GCS → Drone Packet Types
 
 | Type ID | Name |
@@ -249,7 +262,7 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ### 5.1 General Layout
 
-- **Single window with three tabs, no menu bar**
+- **Single window with five tabs, no menu bar**
 - Dark theme (dark background, light text)
 - Each widget has a visible title/label
 
@@ -259,7 +272,7 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 Col:   0 (3D/status)   1 (compass/mtf01)   2 (joystick/gps)   3 (motors)
 Row 0: [3D view      ] [compass           ] [joystick         ] [motors   ]
 Row 1: [status       ] [MTF-01            ] [GPS              ] [motors   ]
-Row 2: [terminal          x2              ] [PID config            x2     ]
+Row 2: [terminal          x2              ] [barometer             x2     ]
 ```
 
 **Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
@@ -267,6 +280,8 @@ Row 2: [terminal          x2              ] [PID config            x2     ]
 **Tab 2 — Map**: the satellite map widget (`MapWidget`) occupies the full tab area.
 
 **Tab 3 — Video**: the video widget (`VideoWidget`) occupies the full tab area.
+
+**Tab 4 — Settings**: PID configuration widget (`PidConfigWidget`) allowing tuning of all 9 PID axes (Rate, Attitude, Position). Values are sent to the drone on demand and updated automatically when `PktPidValues` is received.
 
 ### 5.2 Widget List
 
@@ -338,12 +353,27 @@ Row 2: [terminal          x2              ] [PID config            x2     ]
 
 #### W7 — PID Configuration (`PidConfigWidget`)
 
+Located in the **Settings** tab.
+
 Three PID groups: **Rate**, **Attitude**, **Position**
 Each group has Roll, Pitch, Yaw (or X, Y, Z for position) axes.
 Each axis has **Kp, Ki, Kd** editable float fields.
 
 A **"Send"** button per group sends the updated values to the drone via `PktSetPid`.
 PID values displayed in the fields are updated automatically when `PktPidValues` is received from the drone.
+
+---
+
+#### W13 — Barometer (`BarometerWidget`)
+
+Located in the **Dashboard** tab, row 2, right half (replacing the PID config widget).
+
+Displays barometric sensor values as labeled numbers:
+- `Pressure`: XXXXX.X hPa (converted from Pascals)
+- `Temperature`: XX.X °C
+- `Altitude`: XX.X m (barometric altitude derived on the drone side)
+
+Values update at 10 Hz from `PktBaro` (type `0x08`).
 
 ---
 

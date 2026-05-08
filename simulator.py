@@ -10,6 +10,7 @@ Packet rates:
   0x05 Status    —  10 Hz
   0x06 PID       —   1 Hz
   0x07 Log       — random events
+  0x08 Baro      —  10 Hz
 """
 
 import socket
@@ -176,6 +177,16 @@ def simulate(sock, t: float):
         raw = text.encode("utf-8")[:127].ljust(128, b"\x00")
         payload = struct.pack("<B128s", level, raw)
         sock.send(make_packet(0x07, payload, next_seq(0x07), ts))
+
+    # ── 0x08 Barometer (10 Hz) ───────────────────────────────────────
+    if int(t * 100) % 10 == 0:
+        # Pressure varies slightly around sea level, simulating altitude changes
+        pressure = 101325.0 + 500.0 * math.sin(t * 0.03)
+        temperature = 22.0 + 3.0 * math.sin(t * 0.02)
+        # Barometric altitude from ISA approximation: matches GPS altitude simulation
+        altitude = 50.0 + 5.0 * math.sin(t * 0.1)
+        payload = struct.pack("<fff", pressure, temperature, altitude)
+        sock.send(make_packet(0x08, payload, next_seq(0x08), ts))
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

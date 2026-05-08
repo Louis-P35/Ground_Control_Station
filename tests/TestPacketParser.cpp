@@ -25,6 +25,7 @@ private slots:
         qRegisterMetaType<RadioData>();
         qRegisterMetaType<StatusData>();
         qRegisterMetaType<PidData>();
+        qRegisterMetaType<BaroData>();
     }
 
     // -----------------------------------------------------------------------
@@ -159,6 +160,23 @@ private slots:
         QCOMPARE(d.rate_yaw.kp,      1.2f);
         QCOMPARE(d.attitude_roll.kp, 0.5f);
         QCOMPARE(d.position_z.kp,    3.0f);
+    }
+
+    void baroValid() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::baroReceived);
+
+        PktBaro p{};
+        p.pressure_pa   = 101325.0f;
+        p.temperature_c = 22.5f;
+        p.altitude_m    = 52.3f;
+        parser.parse(TestHelpers::buildPacket(PKT_BARO, p));
+
+        QCOMPARE(spy.count(), 1);
+        auto d = spy.at(0).at(0).value<BaroData>();
+        QCOMPARE(d.pressure_pa,   101325.0f);
+        QCOMPARE(d.temperature_c, 22.5f);
+        QCOMPARE(d.altitude_m,    52.3f);
     }
 
     void logValid() {

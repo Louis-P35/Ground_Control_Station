@@ -28,6 +28,7 @@ static constexpr uint8_t PKT_RADIO    = 0x04;
 static constexpr uint8_t PKT_STATUS   = 0x05;
 static constexpr uint8_t PKT_PID      = 0x06;
 static constexpr uint8_t PKT_LOG      = 0x07;
+static constexpr uint8_t PKT_BARO     = 0x08;
 
 // GCS → Drone
 static constexpr uint8_t PKT_SET_PID  = 0x10;
@@ -107,6 +108,14 @@ struct PktLog {
     PacketHeader header;
     uint8_t level;      // 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR
     char    text[128];  // Null-terminated UTF-8 string
+    uint16_t crc;
+};
+
+struct PktBaro {
+    PacketHeader header;
+    float pressure_pa;   // Atmospheric pressure in Pascals
+    float temperature_c; // Temperature in Celsius
+    float altitude_m;    // Barometric altitude in meters (derived from pressure)
     uint16_t crc;
 };
 

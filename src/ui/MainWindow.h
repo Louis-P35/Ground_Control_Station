@@ -16,6 +16,7 @@ class GpsWidget;
 class MotorWidget;
 class StatusWidget;
 class PidConfigWidget;
+class BarometerWidget;
 class GraphWidget;
 class TerminalWidget;
 class MapWidget;
@@ -41,6 +42,7 @@ private slots:
     void onRadioReceived(RadioData d);
     void onStatusReceived(StatusData d);
     void onPidReceived(PidData d);
+    void onBaroReceived(BaroData d);
     void onLogReceived(uint8_t level, QString text);
     void onStatusBarTick();
 
@@ -66,8 +68,9 @@ private:
     GpsWidget*       m_gps      = nullptr;
     MotorWidget*     m_motor    = nullptr;
     StatusWidget*    m_status   = nullptr;
-    PidConfigWidget* m_pid      = nullptr;
-    GraphWidget*     m_graph    = nullptr;
+    PidConfigWidget* m_pid        = nullptr;
+    BarometerWidget* m_barometer  = nullptr;
+    GraphWidget*     m_graph      = nullptr;
     TerminalWidget*  m_terminal = nullptr;
     MapWidget*       m_map      = nullptr;
     VideoWidget*     m_video    = nullptr;

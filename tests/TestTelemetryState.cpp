@@ -39,6 +39,15 @@ private slots:
         QCOMPARE(d.fix_type,   static_cast<uint8_t>(0));
     }
 
+    void defaults_baro() {
+        TelemetryState s;
+        auto d = s.baro();
+        // Default is standard sea-level pressure (101325 Pa), 0°C, 0 m
+        QCOMPARE(d.pressure_pa,   101325.0f);
+        QCOMPARE(d.temperature_c, 0.0f);
+        QCOMPARE(d.altitude_m,    0.0f);
+    }
+
     // -----------------------------------------------------------------------
     // Round-trip: update then read returns identical data
     // -----------------------------------------------------------------------
@@ -144,6 +153,19 @@ private slots:
         QCOMPARE(out.rate_roll.kd,     in.rate_roll.kd);
         QCOMPARE(out.attitude_yaw.kp,  in.attitude_yaw.kp);
         QCOMPARE(out.position_z.kd,    in.position_z.kd);
+    }
+
+    void updateBaro_roundTrip() {
+        TelemetryState s;
+        BaroData in;
+        in.pressure_pa   = 98500.0f;
+        in.temperature_c = 18.5f;
+        in.altitude_m    = 210.0f;
+        s.updateBaro(in);
+        auto out = s.baro();
+        QCOMPARE(out.pressure_pa,   in.pressure_pa);
+        QCOMPARE(out.temperature_c, in.temperature_c);
+        QCOMPARE(out.altitude_m,    in.altitude_m);
     }
 
     void updateOverwritesPreviousValue() {

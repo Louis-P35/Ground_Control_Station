@@ -58,6 +58,12 @@ struct PidData {
     PidAxis position_z    = {};
 };
 
+struct BaroData {
+    float pressure_pa   = 101325.0f; // Standard sea-level pressure in Pascals
+    float temperature_c = 0.0f;      // Celsius
+    float altitude_m    = 0.0f;      // Barometric altitude in meters
+};
+
 class TelemetryState {
 public:
     // Called from network thread
@@ -67,6 +73,7 @@ public:
     void updateRadio   (const RadioData&    d) { QMutexLocker l(&m_mutex); m_radio    = d; }
     void updateStatus  (const StatusData&   d) { QMutexLocker l(&m_mutex); m_status   = d; }
     void updatePid     (const PidData&      d) { QMutexLocker l(&m_mutex); m_pid      = d; }
+    void updateBaro    (const BaroData&     d) { QMutexLocker l(&m_mutex); m_baro     = d; }
 
     // Called from UI thread — returns a copy
     AttitudeData attitude() const { QMutexLocker l(&m_mutex); return m_attitude; }
@@ -75,6 +82,7 @@ public:
     RadioData    radio()    const { QMutexLocker l(&m_mutex); return m_radio;    }
     StatusData   status()   const { QMutexLocker l(&m_mutex); return m_status;   }
     PidData      pid()      const { QMutexLocker l(&m_mutex); return m_pid;      }
+    BaroData     baro()     const { QMutexLocker l(&m_mutex); return m_baro;     }
 
 private:
     mutable QMutex m_mutex;
@@ -84,4 +92,5 @@ private:
     RadioData      m_radio;
     StatusData     m_status;
     PidData        m_pid;
+    BaroData       m_baro;
 };

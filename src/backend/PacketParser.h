@@ -34,6 +34,7 @@ signals:
     void radioReceived   (RadioData);
     void statusReceived  (StatusData);
     void pidReceived     (PidData);
+    void baroReceived    (BaroData);
     void logReceived     (uint8_t level, QString text);
     void ackReceived     (uint8_t ackType, uint16_t ackSeq, uint8_t success);
 
@@ -50,7 +51,7 @@ private:
         uint32_t expected = 0;
         bool     first    = true;
     };
-    std::array<SeqTracker, 8> m_seqTracker; // index = type (0 unused)
+    std::array<SeqTracker, 9> m_seqTracker; // index = type (0 unused, 0x01–0x08)
     void trackSeq(uint8_t type, uint16_t seq);
 
     // Throttle sync-error logging: at most one warning per second to avoid

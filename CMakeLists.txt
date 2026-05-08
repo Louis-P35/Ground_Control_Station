@@ -30,6 +30,7 @@ set(SOURCES
     src/ui/widgets/MapWidget.cpp
     src/ui/widgets/VideoWidget.cpp
     src/ui/widgets/PidConfigWidget.cpp
+    src/ui/widgets/BarometerWidget.cpp
     src/ui/widgets/GraphWidget.cpp
     src/ui/widgets/TerminalWidget.cpp
 )
@@ -52,6 +53,7 @@ set(HEADERS
     src/ui/widgets/MapWidget.h
     src/ui/widgets/VideoWidget.h
     src/ui/widgets/PidConfigWidget.h
+    src/ui/widgets/BarometerWidget.h
     src/ui/widgets/GraphWidget.h
     src/ui/widgets/TerminalWidget.h
 )
