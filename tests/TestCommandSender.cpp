@@ -202,6 +202,82 @@ private slots:
         QCOMPARE(link.sent.count(), 4);
     }
 
+    // -----------------------------------------------------------------------
+    // CalibCmd — packet structure and ACK handling
+    // -----------------------------------------------------------------------
+
+    void calibCmd_packetSize() {
+        MockUdpLink link;
+        CommandSender sender(&link);
+
+        sender.sendCalibCmd(CALIB_ACCEL, CALIB_START);
+
+        QCOMPARE(link.sent.count(), 1);
+        QCOMPARE(link.sent[0].size(), static_cast<int>(sizeof(PktCalibCmd)));
+    }
+
+    void calibCmd_packetFields() {
+        MockUdpLink link;
+        CommandSender sender(&link);
+
+        sender.sendCalibCmd(CALIB_MAG, CALIB_SAVE);
+
+        PktCalibCmd pkt{};
+        std::memcpy(&pkt, link.sent[0].constData(), sizeof(pkt));
+        QCOMPARE(pkt.header.magic,   PACKET_MAGIC);
+        QCOMPARE(pkt.header.version, PACKET_VERSION);
+        QCOMPARE(pkt.header.type,    static_cast<uint8_t>(PKT_CALIB_CMD));
+        QCOMPARE(pkt.target,         static_cast<uint8_t>(CALIB_MAG));
+        QCOMPARE(pkt.action,         static_cast<uint8_t>(CALIB_SAVE));
+    }
+
+    void calibCmd_crcValid() {
+        MockUdpLink link;
+        CommandSender sender(&link);
+
+        sender.sendCalibCmd(CALIB_LEVEL, CALIB_SAVE);
+
+        PktCalibCmd pkt{};
+        std::memcpy(&pkt, link.sent[0].constData(), sizeof(pkt));
+        int crcLen = sizeof(PacketHeader) + pkt.header.payload_len;
+        uint16_t computed = TestHelpers::crc16(
+            reinterpret_cast<const uint8_t*>(&pkt), crcLen);
+        QCOMPARE(pkt.crc, computed);
+    }
+
+    void calibCmd_seqIncrementsAfterPid() {
+        MockUdpLink link;
+        CommandSender sender(&link);
+
+        sender.sendSetPid(RATE_ROLL, 1.0f, 0.0f, 0.0f);  // seq=1
+        sender.sendCalibCmd(CALIB_ACCEL, CALIB_START);    // seq=2
+
+        PktSetPid pid{};
+        std::memcpy(&pid, link.sent[0].constData(), sizeof(pid));
+        PktCalibCmd calib{};
+        std::memcpy(&calib, link.sent[1].constData(), sizeof(calib));
+        QCOMPARE(pid.header.seq,   static_cast<uint16_t>(1));
+        QCOMPARE(calib.header.seq, static_cast<uint16_t>(2));
+    }
+
+    void calibCmd_ackClears_noRetry() {
+        MockUdpLink link;
+        CommandSender sender(&link);
+
+        sender.sendCalibCmd(CALIB_ACCEL, CALIB_START);  // seq=1
+        QCOMPARE(link.sent.count(), 1);
+
+        // ACK for PKT_CALIB_CMD seq=1
+        PktAck ack{};
+        ack.ack_type = PKT_CALIB_CMD;
+        ack.ack_seq  = 1;
+        ack.success  = 1;
+        link.parser()->parse(TestHelpers::buildPacket(PKT_ACK, ack));
+
+        QTest::qWait(250);
+        QCOMPARE(link.sent.count(), 1);  // no retry after ACK
+    }
+
     void ackClearsOnlyMatchingCommand() {
         MockUdpLink link;
         CommandSender sender(&link);

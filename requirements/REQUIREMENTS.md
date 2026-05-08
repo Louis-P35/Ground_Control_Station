@@ -56,6 +56,7 @@ gcs/
 │       │   ├── StatusWidget.h / .cpp
 │       │   ├── PidConfigWidget.h / .cpp
 │       │   ├── BarometerWidget.h / .cpp
+│       │   ├── CalibrationWidget.h / .cpp
 │       │   ├── GraphWidget.h / .cpp
 │       │   ├── TerminalWidget.h / .cpp
 │       │   └── MapWidget.h / .cpp
@@ -103,6 +104,7 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x06` | PID values | Streamed |
 | `0x07` | Log / terminal text | On event |
 | `0x08` | Barometer (pressure, temperature, altitude) | 10 Hz |
+| `0x09` | Calibration status (per target) | On event |
 
 #### 0x01 — Attitude
 ```cpp
@@ -207,11 +209,29 @@ struct PktBaro {
 };
 ```
 
+#### 0x09 — Calibration Status
+Sent by the drone during and after a calibration sequence.
+
+```cpp
+enum CalibTarget    : uint8_t { CALIB_ACCEL = 0, CALIB_MAG = 1, CALIB_LEVEL = 2 };
+enum CalibStatusValue : uint8_t { CALIB_IDLE = 0, CALIB_RUNNING = 1, CALIB_SUCCESS = 2, CALIB_FAILED = 3 };
+
+struct PktCalibStatus {
+    PacketHeader header;
+    uint8_t target;         // CalibTarget
+    uint8_t status;         // CalibStatusValue
+    uint8_t progress;       // 0–100 % (meaningful during CALIB_RUNNING)
+    char    message[64];    // Null-terminated UTF-8 human-readable message
+    uint16_t crc;
+};
+```
+
 ### 4.3 GCS → Drone Packet Types
 
 | Type ID | Name |
 |---------|------|
 | `0x10` | Set PID coefficients |
+| `0x20` | Calibration command |
 
 #### 0x10 — Set PID
 ```cpp
@@ -229,9 +249,23 @@ enum PidAxisId : uint8_t {
 };
 ```
 
+#### 0x20 — Calibration Command
+Sent by the GCS to start, stop, or save a calibration.
+
+```cpp
+enum CalibAction : uint8_t { CALIB_START = 0, CALIB_STOP = 1, CALIB_SAVE = 2 };
+
+struct PktCalibCmd {
+    PacketHeader header;
+    uint8_t target;   // CalibTarget (CALIB_ACCEL / CALIB_MAG / CALIB_LEVEL)
+    uint8_t action;   // CalibAction (CALIB_START / CALIB_STOP / CALIB_SAVE)
+    uint16_t crc;
+};
+```
+
 ### 4.4 ACK Mechanism
 
-`0x10` (Set PID) requires an acknowledgement from the drone:
+`0x10` (Set PID) and `0x20` (Calibration command) require an acknowledgement from the drone:
 
 ```cpp
 struct PktAck {
@@ -244,7 +278,7 @@ struct PktAck {
 ```
 
 - GCS retries a command up to **3 times** with **200 ms** timeout if no ACK is received
-- Telemetry packets (0x01–0x07) do **not** require ACK
+- Telemetry packets (0x01–0x09) do **not** require ACK
 
 ### 4.5 Passive Reception Model
 
@@ -262,7 +296,7 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ### 5.1 General Layout
 
-- **Single window with five tabs, no menu bar**
+- **Single window with six tabs, no menu bar**
 - Dark theme (dark background, light text)
 - Each widget has a visible title/label
 
@@ -270,14 +304,15 @@ The GCS tracks sequence numbers per packet type to compute a **packet loss perce
 
 ```
 Col:   0              1              2              3
-Row 0: [3D (r0-1,c0)] [joystick (r0-1)] [compass (r0-1)] [motors (r0-1)]
-Row 1: [3D           ] [joystick       ] [compass       ] [motors       ]
-Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
+Row 0: [3D (r0-1,c0-1)              ] [joystick      ] [motors (r0-1)]
+Row 1: [3D                          ] [compass       ] [motors       ]
+Row 2: [terminal (c0-1)             ] [baro|gps|status|mtf01 (c2-3)  ]
 ```
 
-The 3D view spans rows 0-1, col 0 (same width as original, double height) for a taller real-time visualization without taking horizontal space from the other widgets.
-Joystick and compass each span the same 2 rows.
-Row 2 right half is a horizontal info bar grouping barometer, GPS, status, and MTF-01 side by side.
+The 3D view spans rows 0-1, cols 0-1 (square: same width as height).
+Joystick sits above compass in col 2 (each occupies 1 row).
+Row 2 right half (cols 2-3) is a horizontal info bar grouping barometer, GPS, status, and MTF-01 side by side.
+Row stretch ratios: rows 0 and 1 weight 2, row 2 weight 3 (terminal gets more vertical space).
 
 **Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
 
@@ -286,6 +321,8 @@ Row 2 right half is a horizontal info bar grouping barometer, GPS, status, and M
 **Tab 3 — Video**: the video widget (`VideoWidget`) occupies the full tab area.
 
 **Tab 4 — Settings**: PID configuration widget (`PidConfigWidget`) allowing tuning of all 9 PID axes (Rate, Attitude, Position). Values are sent to the drone on demand and updated automatically when `PktPidValues` is received.
+
+**Tab 5 — Calibration**: sensor calibration widget (`CalibrationWidget`) with three panels — Accelerometer, Magnetometer, Level/Attitude 0.
 
 ### 5.2 Widget List
 
@@ -488,6 +525,35 @@ Live video feed occupying the full **Video** tab. Displays input from any camera
 - On Windows, requires `windeployqt` to deploy the FFmpeg/Windows media backend plugins at runtime
 - Camera errors are reported via `QCamera::errorOccurred` and displayed in the status label
 - **Qt gotcha**: when items are added to the combo while signals are blocked, Qt silently sets `currentIndex=0`; a subsequent `setCurrentIndex(0)` emits no signal. `startCamera()` must therefore be called explicitly after populating the list
+
+---
+
+---
+
+#### W14 — Calibration (`CalibrationWidget`)
+
+Located in the **Calibration** tab. Three panels side by side, one per calibration target.
+
+**Panels:**
+
+| Panel | Target constant | Has progress bar | Buttons |
+|-------|----------------|-----------------|---------|
+| Accelerometer | `CALIB_ACCEL = 0` | Yes | Start, Stop/Save |
+| Magnetometer  | `CALIB_MAG   = 1` | Yes | Start, Stop/Save |
+| Level / Attitude 0 | `CALIB_LEVEL = 2` | No | Set Level |
+
+Each panel contains:
+- A description label explaining how to perform the calibration
+- A `QProgressBar` (0–100 %) for Accel and Mag only
+- A colored status indicator dot + text label: Idle (grey), Running (amber), Success (green), Failed (red)
+- A free-form status message string received from the drone
+
+**Behavior:**
+- Pressing **Start** emits `calibCmdRequested(target, CALIB_START)` → `CommandSender::sendCalibCmd()`
+- Pressing **Stop / Save** emits `calibCmdRequested(target, CALIB_SAVE)`
+- Pressing **Set Level** emits `calibCmdRequested(CALIB_LEVEL, CALIB_SAVE)`
+- Live status updates arrive via `PKT_CALIB_STATUS` (0x09) and are forwarded to `updateCalibStatus()`
+- Commands use the same ACK-backed retry loop as `PKT_SET_PID` (max 3 retries, 200 ms interval)
 
 ---
 

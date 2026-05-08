@@ -179,6 +179,44 @@ private slots:
         QCOMPARE(d.altitude_m,    52.3f);
     }
 
+    void calibStatusValid() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::calibStatusReceived);
+
+        PktCalibStatus p{};
+        p.target   = CALIB_MAG;
+        p.status   = CALIB_RUNNING;
+        p.progress = 67;
+        std::strncpy(p.message, "Rotate slowly", sizeof(p.message));
+        parser.parse(TestHelpers::buildPacket(PKT_CALIB_STATUS, p));
+
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toUInt(),              static_cast<uint>(CALIB_MAG));
+        QCOMPARE(spy.at(0).at(1).toUInt(),              static_cast<uint>(CALIB_RUNNING));
+        QCOMPARE(spy.at(0).at(2).toUInt(),              67u);
+        QCOMPARE(spy.at(0).at(3).toString(), QString("Rotate slowly"));
+    }
+
+    void calibStatus_nullTerminationSafety() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::calibStatusReceived);
+
+        PktCalibStatus p{};
+        p.target   = CALIB_ACCEL;
+        p.status   = CALIB_IDLE;
+        p.progress = 0;
+        // Fill entire message buffer with 'B' — no null terminator
+        std::memset(p.message, 'B', sizeof(p.message));
+        parser.parse(TestHelpers::buildPacket(PKT_CALIB_STATUS, p));
+
+        QCOMPARE(spy.count(), 1);
+        // Parser forces message[63] = '\0' → exactly 63 'B' chars
+        QString msg = spy.at(0).at(3).toString();
+        QCOMPARE(msg.size(), 63);
+        for (QChar c : msg)
+            QCOMPARE(c, QChar('B'));
+    }
+
     void logValid() {
         PacketParser parser;
         QSignalSpy spy(&parser, &PacketParser::logReceived);

@@ -17,6 +17,7 @@ class MotorWidget;
 class StatusWidget;
 class PidConfigWidget;
 class BarometerWidget;
+class CalibrationWidget;
 class GraphWidget;
 class TerminalWidget;
 class MapWidget;
@@ -43,6 +44,7 @@ private slots:
     void onStatusReceived(StatusData d);
     void onPidReceived(PidData d);
     void onBaroReceived(BaroData d);
+    void onCalibStatusReceived(uint8_t target, uint8_t status, uint8_t progress, QString message);
     void onLogReceived(uint8_t level, QString text);
     void onStatusBarTick();
 
@@ -70,10 +72,11 @@ private:
     StatusWidget*    m_status   = nullptr;
     PidConfigWidget* m_pid        = nullptr;
     BarometerWidget* m_barometer  = nullptr;
-    GraphWidget*     m_graph      = nullptr;
-    TerminalWidget*  m_terminal = nullptr;
-    MapWidget*       m_map      = nullptr;
-    VideoWidget*     m_video    = nullptr;
+    GraphWidget*        m_graph       = nullptr;
+    TerminalWidget*     m_terminal    = nullptr;
+    MapWidget*          m_map         = nullptr;
+    VideoWidget*        m_video       = nullptr;
+    CalibrationWidget*  m_calibration = nullptr;
 
     // Status bar labels
     QLabel* m_statusConn    = nullptr;

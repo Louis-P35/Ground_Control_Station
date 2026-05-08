@@ -20,6 +20,7 @@
 #include "widgets/TerminalWidget.h"
 #include "widgets/MapWidget.h"
 #include "widgets/VideoWidget.h"
+#include "widgets/CalibrationWidget.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Ground Control Station");
@@ -77,10 +78,11 @@ MainWindow::~MainWindow() {
 //    Row 1: [3D                          ] [compass       ] [motors       ]
 //    Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 //
-//  Tab 1 "Graph":    Full-window graph widget
-//  Tab 2 "Map":      Full-window map widget
-//  Tab 3 "Video":    Full-window video feed
-//  Tab 4 "Settings": PID configuration
+//  Tab 1 "Graph":       Full-window graph widget
+//  Tab 2 "Map":         Full-window map widget
+//  Tab 3 "Video":       Full-window video feed
+//  Tab 4 "Settings":    PID configuration
+//  Tab 5 "Calibration": Sensor calibration (accel, mag, level)
 // ---------------------------------------------------------------------------
 void MainWindow::setupUi() {
     m_drone3d  = new DroneWidget3D(this);
@@ -92,10 +94,11 @@ void MainWindow::setupUi() {
     m_status   = new StatusWidget(this);
     m_pid        = new PidConfigWidget(this);
     m_barometer  = new BarometerWidget(this);
-    m_graph      = new GraphWidget(this);
-    m_terminal = new TerminalWidget(this);
-    m_map      = new MapWidget(this);
-    m_video    = new VideoWidget(this);
+    m_graph       = new GraphWidget(this);
+    m_terminal    = new TerminalWidget(this);
+    m_map         = new MapWidget(this);
+    m_video       = new VideoWidget(this);
+    m_calibration = new CalibrationWidget(this);
 
     // --- Tab 0: Dashboard ---
     auto* dashTab = new QWidget(this);
@@ -201,6 +204,9 @@ void MainWindow::setupUi() {
     // --- Tab 4: Settings — PID tuning parameters ---
     m_tabs->addTab(settingsTab,  "Settings");
 
+    // --- Tab 5: Calibration — on-ground sensor calibration ---
+    m_tabs->addTab(m_calibration, "Calibration");
+
     setCentralWidget(m_tabs);
 }
 
@@ -247,8 +253,18 @@ void MainWindow::connectSignals() {
             this,   &MainWindow::onPidReceived,             Qt::QueuedConnection);
     connect(parser, &PacketParser::baroReceived,
             this,   &MainWindow::onBaroReceived,            Qt::QueuedConnection);
+    connect(parser, &PacketParser::calibStatusReceived,
+            this,   &MainWindow::onCalibStatusReceived,     Qt::QueuedConnection);
     connect(parser, &PacketParser::logReceived,
             this,   &MainWindow::onLogReceived,             Qt::QueuedConnection);
+
+    // Calibration widget → command sender (invoked on network thread)
+    connect(m_calibration, &CalibrationWidget::calibCmdRequested,
+            this, [this](uint8_t target, uint8_t action) {
+        QMetaObject::invokeMethod(m_cmdSender, [this, target, action] {
+            m_cmdSender->sendCalibCmd(target, action);
+        }, Qt::QueuedConnection);
+    });
 
     // PID config widget → command sender (invoked on network thread)
     connect(m_pid, &PidConfigWidget::sendPidRequested,
@@ -316,6 +332,16 @@ void MainWindow::onPidReceived(PidData d) {
 void MainWindow::onBaroReceived(BaroData d) {
     m_state.updateBaro(d);
     m_barometer->updateData(d);
+}
+
+void MainWindow::onCalibStatusReceived(uint8_t target, uint8_t status,
+                                       uint8_t progress, QString message) {
+    CalibStatusData csd;
+    csd.status   = status;
+    csd.progress = progress;
+    csd.message  = message.toStdString();
+    m_state.updateCalibStatus(target, csd);
+    m_calibration->updateCalibStatus(target, status, progress, message);
 }
 
 void MainWindow::onLogReceived(uint8_t level, QString text) {

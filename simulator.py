@@ -3,14 +3,15 @@ GCS Telemetry Simulator
 Sends realistic fake drone telemetry to localhost:5005 via UDP.
 
 Packet rates:
-  0x01 Attitude  — 100 Hz
-  0x02 GPS       —  10 Hz
-  0x03 MTF-01    —  50 Hz
-  0x04 Radio     —  50 Hz
-  0x05 Status    —  10 Hz
-  0x06 PID       —   1 Hz
-  0x07 Log       — random events
-  0x08 Baro      —  10 Hz
+  0x01 Attitude       — 100 Hz
+  0x02 GPS            —  10 Hz
+  0x03 MTF-01         —  50 Hz
+  0x04 Radio          —  50 Hz
+  0x05 Status         —  10 Hz
+  0x06 PID            —   1 Hz
+  0x07 Log            — random events
+  0x08 Baro           —  10 Hz
+  0x09 CalibStatus    —   1 Hz (all three targets, idle)
 """
 
 import socket
@@ -187,6 +188,16 @@ def simulate(sock, t: float):
         altitude = 50.0 + 5.0 * math.sin(t * 0.1)
         payload = struct.pack("<fff", pressure, temperature, altitude)
         sock.send(make_packet(0x08, payload, next_seq(0x08), ts))
+
+    # ── 0x09 CalibStatus (1 Hz) ──────────────────────────────────────
+    # Sends IDLE status for all three calibration targets so the GCS shows
+    # the panels in their default state without requiring a real calibration.
+    if int(t * 100) % 100 == 0:
+        for target in range(3):  # CALIB_ACCEL=0, CALIB_MAG=1, CALIB_LEVEL=2
+            # status=0 (IDLE), progress=0, message=""
+            msg_raw = b"\x00" * 64
+            payload = struct.pack("<BBB64s", target, 0, 0, msg_raw)
+            sock.send(make_packet(0x09, payload, next_seq(0x09), ts))
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
