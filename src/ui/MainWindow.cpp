@@ -73,8 +73,8 @@ MainWindow::~MainWindow() {
 //
 //  Tab 0 "Dashboard":
 //    Col:   0              1              2              3
-//    Row 0: [3D (r0-1,c0)] [joystick (r0-1)] [compass (r0-1)] [motors (r0-1)]
-//    Row 1: [3D           ] [joystick       ] [compass       ] [motors       ]
+//    Row 0: [3D (r0-1, c0-1)             ] [joystick      ] [motors (r0-1)]
+//    Row 1: [3D                          ] [compass       ] [motors       ]
 //    Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 //
 //  Tab 1 "Graph":    Full-window graph widget
@@ -103,11 +103,11 @@ void MainWindow::setupUi() {
     grid->setSpacing(6);
     grid->setContentsMargins(6, 6, 6, 6);
 
-    // Rows 0-1, col 0: 3D view — taller than original but same width (1 col).
-    // Joystick and compass each span the same 2 rows alongside it.
-    grid->addWidget(m_drone3d,  0, 0, 2, 1);
-    grid->addWidget(m_joystick, 0, 1, 2, 1);
-    grid->addWidget(m_compass,  0, 2, 2, 1); // swapped: compass replaces GPS here
+    // Rows 0-1, col 0: 3D view — same width as original, double height.
+    // Joystick sits above compass in col 2; col 1 is intentionally empty.
+    grid->addWidget(m_drone3d,  0, 0, 2, 2);
+    grid->addWidget(m_joystick, 0, 2);        // row 0, above compass
+    grid->addWidget(m_compass,  1, 2);        // row 1, below joystick
     grid->addWidget(m_motor,    0, 3, 2, 1);
 
     // Row 2: terminal (left half) + info bar (right half).
