@@ -4,7 +4,7 @@
 #include "TestHelpers.h"
 #include "MockUdpLink.h"
 #include "backend/CommandSender.h"
-#include "backend/Protocol.h"
+#include "Protocol.h"
 
 // ---------------------------------------------------------------------------
 // TestCommandSender — unit tests for CommandSender.

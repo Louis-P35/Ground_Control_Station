@@ -2,7 +2,7 @@
 #include <QByteArray>
 #include <QObject>
 #include <array>
-#include "Protocol.h"
+#include "Protocol.h" // shared with ESP32 firmware — lives in common/
 #include "TelemetryState.h"
 
 // For sync-error log throttling (avoid spamming on corrupted streams)
@@ -34,8 +34,9 @@ signals:
     void radioReceived   (RadioData);
     void statusReceived  (StatusData);
     void pidReceived     (PidData);
-    void baroReceived    (BaroData);
-    void logReceived     (uint8_t level, QString text);
+    void baroReceived        (BaroData);
+    void calibStatusReceived (uint8_t target, uint8_t status, uint8_t progress, QString message);
+    void logReceived         (uint8_t level, QString text);
     void ackReceived     (uint8_t ackType, uint16_t ackSeq, uint8_t success);
 
 private:
@@ -51,7 +52,7 @@ private:
         uint32_t expected = 0;
         bool     first    = true;
     };
-    std::array<SeqTracker, 9> m_seqTracker; // index = type (0 unused, 0x01–0x08)
+    std::array<SeqTracker, 10> m_seqTracker; // index = type (0 unused, 0x01–0x09)
     void trackSeq(uint8_t type, uint16_t seq);
 
     // Throttle sync-error logging: at most one warning per second to avoid

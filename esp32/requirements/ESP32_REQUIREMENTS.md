@@ -36,12 +36,12 @@ It plays two roles simultaneously:
 ## 2. Shared Protocol
 
 The UDP packet format is **identical** to the one used by the GCS.
-The authoritative struct definitions live in `src/backend/Protocol.h` (C++) and are reused directly in the ESP32 firmware.
+The authoritative struct definitions live in `common/Protocol.h` at the repository root and are included directly by both the GCS and the ESP32 firmware — there is only one copy.
 
-The ESP32 firmware must include (or duplicate) this header without modification.
-Any change to `Protocol.h` must be reflected in the firmware.
+The ESP32 build system must add `<repo_root>/common` to the include path so that `#include "Protocol.h"` resolves to this shared file.
+Any change to `common/Protocol.h` affects both projects simultaneously.
 
-See `src/backend/Protocol.h` and `requirements/REQUIREMENTS.md` §4 for the full packet specification.
+See `common/Protocol.h` and `requirements/REQUIREMENTS.md` §4 for the full packet specification.
 
 ---
 

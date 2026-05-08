@@ -2,7 +2,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <string>
-#include "Protocol.h"
+#include "Protocol.h" // shared with ESP32 firmware — lives in common/
 
 // ---------------------------------------------------------------------------
 // TelemetryState — thread-safe snapshot of the latest drone state.
@@ -64,6 +64,12 @@ struct BaroData {
     float altitude_m    = 0.0f;      // Barometric altitude in meters
 };
 
+struct CalibStatusData {
+    uint8_t     status   = CALIB_IDLE; // CalibStatusValue
+    uint8_t     progress = 0;          // 0-100 %
+    std::string message;               // Human-readable status from drone
+};
+
 class TelemetryState {
 public:
     // Called from network thread
@@ -73,24 +79,35 @@ public:
     void updateRadio   (const RadioData&    d) { QMutexLocker l(&m_mutex); m_radio    = d; }
     void updateStatus  (const StatusData&   d) { QMutexLocker l(&m_mutex); m_status   = d; }
     void updatePid     (const PidData&      d) { QMutexLocker l(&m_mutex); m_pid      = d; }
-    void updateBaro    (const BaroData&     d) { QMutexLocker l(&m_mutex); m_baro     = d; }
+    void updateBaro       (const BaroData&       d) { QMutexLocker l(&m_mutex); m_baro = d; }
+    void updateCalibStatus(uint8_t target, const CalibStatusData& d) {
+        if (target > 2) return;
+        QMutexLocker l(&m_mutex);
+        m_calibStatus[target] = d;
+    }
 
     // Called from UI thread — returns a copy
-    AttitudeData attitude() const { QMutexLocker l(&m_mutex); return m_attitude; }
-    GpsData      gps()      const { QMutexLocker l(&m_mutex); return m_gps;      }
-    Mtf01Data    mtf01()    const { QMutexLocker l(&m_mutex); return m_mtf01;    }
-    RadioData    radio()    const { QMutexLocker l(&m_mutex); return m_radio;    }
-    StatusData   status()   const { QMutexLocker l(&m_mutex); return m_status;   }
-    PidData      pid()      const { QMutexLocker l(&m_mutex); return m_pid;      }
-    BaroData     baro()     const { QMutexLocker l(&m_mutex); return m_baro;     }
+    AttitudeData   attitude()                const { QMutexLocker l(&m_mutex); return m_attitude; }
+    GpsData        gps()                     const { QMutexLocker l(&m_mutex); return m_gps;      }
+    Mtf01Data      mtf01()                   const { QMutexLocker l(&m_mutex); return m_mtf01;    }
+    RadioData      radio()                   const { QMutexLocker l(&m_mutex); return m_radio;    }
+    StatusData     status()                  const { QMutexLocker l(&m_mutex); return m_status;   }
+    PidData        pid()                     const { QMutexLocker l(&m_mutex); return m_pid;      }
+    BaroData       baro()                    const { QMutexLocker l(&m_mutex); return m_baro;     }
+    CalibStatusData calibStatus(uint8_t target) const {
+        if (target > 2) return {};
+        QMutexLocker l(&m_mutex);
+        return m_calibStatus[target];
+    }
 
 private:
-    mutable QMutex m_mutex;
-    AttitudeData   m_attitude;
-    GpsData        m_gps;
-    Mtf01Data      m_mtf01;
-    RadioData      m_radio;
-    StatusData     m_status;
-    PidData        m_pid;
-    BaroData       m_baro;
+    mutable QMutex  m_mutex;
+    AttitudeData    m_attitude;
+    GpsData         m_gps;
+    Mtf01Data       m_mtf01;
+    RadioData       m_radio;
+    StatusData      m_status;
+    PidData         m_pid;
+    BaroData        m_baro;
+    CalibStatusData m_calibStatus[3]; // indexed by CalibTarget (0=accel, 1=mag, 2=level)
 };

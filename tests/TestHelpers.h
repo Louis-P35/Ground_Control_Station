@@ -1,7 +1,7 @@
 #pragma once
 #include <QByteArray>
 #include <cstring>
-#include "backend/Protocol.h"
+#include "Protocol.h"
 #include "backend/TelemetryState.h"
 
 // Register custom types so QSignalSpy can store them in QVariant.

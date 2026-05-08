@@ -20,6 +20,7 @@ add_executable(GCSTests ${TEST_SOURCES})
 
 target_include_directories(GCSTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/common
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

@@ -62,7 +62,7 @@ set(HEADERS
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-target_include_directories(${PROJECT_NAME} PRIVATE src)
+target_include_directories(${PROJECT_NAME} PRIVATE src common)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core

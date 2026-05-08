@@ -3,7 +3,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QProgressBar>
-#include "backend/Protocol.h"
+#include "Protocol.h"
 
 // ---------------------------------------------------------------------------
 // CalibrationWidget — UI for on-ground sensor calibration.

@@ -5,7 +5,7 @@
 #include <QStringList>
 #include <array>
 #include "backend/TelemetryState.h"
-#include "backend/Protocol.h"
+#include "Protocol.h"
 
 // ---------------------------------------------------------------------------
 // PidConfigWidget — editable PID fields only (Rate / Attitude / Position).

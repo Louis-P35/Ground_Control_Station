@@ -28,10 +28,12 @@ static constexpr uint8_t PKT_RADIO    = 0x04;
 static constexpr uint8_t PKT_STATUS   = 0x05;
 static constexpr uint8_t PKT_PID      = 0x06;
 static constexpr uint8_t PKT_LOG      = 0x07;
-static constexpr uint8_t PKT_BARO     = 0x08;
+static constexpr uint8_t PKT_BARO          = 0x08;
+static constexpr uint8_t PKT_CALIB_STATUS  = 0x09; // Drone → GCS: calibration progress
 
 // GCS → Drone
-static constexpr uint8_t PKT_SET_PID  = 0x10;
+static constexpr uint8_t PKT_SET_PID       = 0x10;
+static constexpr uint8_t PKT_CALIB_CMD     = 0x20; // Start / stop / save a calibration
 // Drone → GCS (ACK)
 static constexpr uint8_t PKT_ACK      = 0x11;
 
@@ -120,6 +122,42 @@ struct PktBaro {
 };
 
 // ---------------------------------------------------------------------------
+// Calibration
+// ---------------------------------------------------------------------------
+
+// Which sensor is being calibrated
+enum CalibTarget : uint8_t {
+    CALIB_ACCEL = 0, // Accelerometer
+    CALIB_MAG   = 1, // Magnetometer
+    CALIB_LEVEL = 2, // Zero attitude (stationary hover reference)
+};
+
+// Action sent from GCS to the drone
+enum CalibAction : uint8_t {
+    CALIB_START = 0, // Begin the calibration sequence
+    CALIB_STOP  = 1, // Abort without saving
+    CALIB_SAVE  = 2, // Stop acquisition and persist results
+};
+
+// Status values reported by the drone
+enum CalibStatusValue : uint8_t {
+    CALIB_IDLE    = 0,
+    CALIB_RUNNING = 1,
+    CALIB_SUCCESS = 2,
+    CALIB_FAILED  = 3,
+};
+
+// 0x09 — Drone → GCS: calibration progress for one sensor
+struct PktCalibStatus {
+    PacketHeader header;
+    uint8_t target;      // CalibTarget
+    uint8_t status;      // CalibStatusValue
+    uint8_t progress;    // 0-100 %
+    char    message[64]; // Null-terminated human-readable status message
+    uint16_t crc;
+};
+
+// ---------------------------------------------------------------------------
 // GCS → Drone packets
 // ---------------------------------------------------------------------------
 
@@ -133,6 +171,14 @@ struct PktSetPid {
     PacketHeader header;
     uint8_t axis_id; // PidAxisId
     float   kp, ki, kd;
+    uint16_t crc;
+};
+
+// 0x20 — GCS → Drone: start/stop/save a calibration sequence
+struct PktCalibCmd {
+    PacketHeader header;
+    uint8_t target; // CalibTarget
+    uint8_t action; // CalibAction
     uint16_t crc;
 };
 

@@ -2,7 +2,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QMap>
-#include "Protocol.h"
+#include "Protocol.h" // shared with ESP32 firmware — lives in common/
 #include "UdpLink.h"
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,9 @@ public:
     // Send a single PID axis update. Queues the packet for ACK-backed delivery.
     void sendSetPid(PidAxisId axis, float kp, float ki, float kd);
 
+    // Send a calibration command (start/stop/save). ACK-backed.
+    void sendCalibCmd(uint8_t target, uint8_t action);
+
 private slots:
     void onAckReceived(uint8_t ackType, uint16_t ackSeq, uint8_t success);
     void onRetryTimer();
@@ -31,7 +34,8 @@ private:
         uint16_t   seq;
     };
 
-    QByteArray buildSetPid(PidAxisId axis, float kp, float ki, float kd, uint16_t seq);
+    QByteArray buildSetPid  (PidAxisId axis, float kp, float ki, float kd, uint16_t seq);
+    QByteArray buildCalibCmd(uint8_t target, uint8_t action, uint16_t seq);
     static uint16_t crc16(const uint8_t* data, int len);
 
     UdpLink*  m_link;

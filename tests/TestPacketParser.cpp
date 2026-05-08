@@ -3,7 +3,7 @@
 #include <cstring>
 #include "TestHelpers.h"
 #include "backend/PacketParser.h"
-#include "backend/Protocol.h"
+#include "Protocol.h"
 
 // ---------------------------------------------------------------------------
 // TestPacketParser — unit tests for PacketParser.
