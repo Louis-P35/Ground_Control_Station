@@ -11,10 +11,11 @@ Packet rates:
   0x06 PID            —   1 Hz
   0x07 Log            — random events
   0x08 Baro           —  10 Hz
-  0x09 CalibStatus    —   1 Hz (all three targets, idle)
+  0x09 CalibStatus    —   1 Hz (reacts to PKT_CALIB_CMD from GCS)
 """
 
 import socket
+import select
 import struct
 import time
 import math
@@ -60,6 +61,94 @@ def euler_to_quat(roll, pitch, yaw):
         cr*sp*cy + sr*cp*sy,   # qy
         cr*cp*sy - sr*sp*cy,   # qz
     )
+
+# ── CalibStatus values (mirror of Protocol.h enums) ─────────────────────────
+CALIB_IDLE    = 0
+CALIB_RUNNING = 1
+CALIB_SUCCESS = 2
+
+# CalibAction values
+CALIB_START = 0
+CALIB_STOP  = 1
+CALIB_SAVE  = 2
+
+# ── Per-target calibration state machine ──────────────────────────────────────
+class TargetState:
+    def __init__(self, run_duration_s, has_progress, done_msg):
+        self.status       = CALIB_IDLE
+        self.progress     = 0
+        self.message      = ""
+        self.start_t      = 0.0   # wall time when RUNNING started
+        self.done_t       = 0.0   # wall time when SUCCESS was set
+        self.run_duration = run_duration_s
+        self.has_progress = has_progress
+        self.done_msg     = done_msg
+
+calib = [
+    TargetState(10.0, True,  "Accelerometer ready!"),   # 0: Accel
+    TargetState(25.0, True,  "Magnetometer ready!"),    # 1: Mag
+    TargetState(0.0,  False, "Level reference saved!"), # 2: Level
+]
+
+ACCEL_MSGS = ["Collecting samples...", "Keep the drone still...",
+              "Measuring gravity vector..."]
+MAG_MSGS   = ["Rotate the drone...", "Cover all orientations...",
+              "Keep rotating slowly...", "Almost done..."]
+
+def update_calib_states(now):
+    """Advance in-progress calibrations and auto-clear SUCCESS after 5 s."""
+    for i, c in enumerate(calib):
+        if c.status == CALIB_RUNNING:
+            elapsed = now - c.start_t
+            if c.has_progress:
+                c.progress = min(99, int(elapsed / c.run_duration * 100))
+                if i == 0:
+                    c.message = ACCEL_MSGS[int(elapsed / 3.4) % len(ACCEL_MSGS)]
+                elif i == 1:
+                    c.message = MAG_MSGS[int(elapsed / 6.3) % len(MAG_MSGS)]
+        elif c.status == CALIB_SUCCESS:
+            # Auto-reset to IDLE 5 seconds after success
+            if now - c.done_t > 5.0:
+                c.status   = CALIB_IDLE
+                c.progress = 0
+                c.message  = ""
+
+def on_calib_cmd(target, action, now):
+    """Handle an incoming PKT_CALIB_CMD from the GCS."""
+    if target >= 3:
+        return
+    c = calib[target]
+    if action == CALIB_START:
+        c.status   = CALIB_RUNNING
+        c.progress = 0
+        c.start_t  = now
+        c.message  = "Starting calibration..."
+    elif action in (CALIB_STOP, CALIB_SAVE):
+        c.status   = CALIB_SUCCESS
+        c.progress = 100 if c.has_progress else 0
+        c.done_t   = now
+        c.message  = c.done_msg
+
+def try_receive_cmd(sock, now):
+    """Non-blocking read of incoming PKT_CALIB_CMD packets from the GCS."""
+    readable, _, _ = select.select([sock], [], [], 0)
+    if not readable:
+        return
+    try:
+        data = sock.recv(4096)
+    except OSError:
+        return
+    # Minimal parse: magic (2 B) + version (1 B) + type (1 B) + ... + payload
+    if len(data) < 14:   # header (12) + target (1) + action (1)
+        return
+    magic    = struct.unpack_from("<H", data, 0)[0]
+    pkt_type = data[3]
+    if magic != MAGIC or pkt_type != 0x20:   # 0x20 = PKT_CALIB_CMD
+        return
+    target = data[12]
+    action = data[13]
+    on_calib_cmd(target, action, now)
+    print(f"  [CMD] CalibCmd target={target} action={action}")
 
 # ── Simulation state ──────────────────────────────────────────────────────────
 seqs = [0] * 0x20   # sequence counters per packet type
@@ -190,13 +279,13 @@ def simulate(sock, t: float):
         sock.send(make_packet(0x08, payload, next_seq(0x08), ts))
 
     # ── 0x09 CalibStatus (1 Hz) ──────────────────────────────────────
-    # Sends IDLE status for all three calibration targets so the GCS shows
-    # the panels in their default state without requiring a real calibration.
+    # Streams the current state of each calibration target. States are
+    # driven by PKT_CALIB_CMD commands received from the GCS — the drone
+    # never starts a calibration on its own.
     if int(t * 100) % 100 == 0:
-        for target in range(3):  # CALIB_ACCEL=0, CALIB_MAG=1, CALIB_LEVEL=2
-            # status=0 (IDLE), progress=0, message=""
-            msg_raw = b"\x00" * 64
-            payload = struct.pack("<BBB64s", target, 0, 0, msg_raw)
+        for i, c in enumerate(calib):
+            msg_raw = c.message.encode("utf-8")[:63].ljust(64, b"\x00")
+            payload = struct.pack("<BBB64s", i, c.status, c.progress, msg_raw)
             sock.send(make_packet(0x09, payload, next_seq(0x09), ts))
 
 
@@ -212,6 +301,8 @@ def main():
 
     while True:
         t_now = time.perf_counter() - t0
+        update_calib_states(t_now)
+        try_receive_cmd(sock, t_now)
         simulate(sock, t_now)
 
         tick  += 1
