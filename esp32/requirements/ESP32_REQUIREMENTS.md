@@ -69,9 +69,10 @@ The FC is the **SPI master**. The ESP32 is the **SPI slave**.
 | RX     | 25   |
 | TX     | 26   |
 
-- Baud rate: TBD (refer to MTF-01 datasheet)
+- Baud rate: **115200 baud**, 8N1
+- Protocol: **MAVLink v1** (see §5.5 for full parsing specification)
 - Data: distance (m), optical flow X/Y (px/s), quality (0–255)
-- Expected output rate: 50 Hz
+- Expected output rate: ~50 Hz
 - Maps to `PKT_MTF01 (0x03)`
 
 ### 3.3 GPS (UART)
@@ -202,6 +203,142 @@ The SPI frame format between FC and ESP32 is a **separate, lower-level protocol*
 **ESP32 → FC (MISO, piggy-backed on each transaction):**
 - Pending GCS command (if any): type + payload (PID update or CalibCmd)
 - Command present flag (1 bit or first byte) to avoid FC parsing stale data
+
+---
+
+### 5.5 MTF-01 MAVLink v1 Parser
+
+#### 5.5.1 Wire format
+
+The MTF-01 speaks **MAVLink v1** at 115200 baud, 8N1 on UART (GPIO 25 RX / 26 TX).
+Each MAVLink v1 frame has the following byte layout:
+
+```
+Offset  Size  Field
+  0      1    STX   — always 0xFE (start-of-frame marker)
+  1      1    LEN   — payload length in bytes
+  2      1    SEQ   — sender sequence number (wraps 0–255)
+  3      1    SYSID — system ID of the sender
+  4      1    COMPID— component ID of the sender
+  5      1    MSGID — message type identifier
+  6    LEN    PAYLOAD
+6+LEN    2    CRC   — little-endian CRC16-X25 (see §5.5.3)
+```
+
+Total frame size: `LEN + 8` bytes.
+
+#### 5.5.2 Relevant message types
+
+Only two message IDs are parsed; all others are discarded.
+
+---
+
+**MSG ID 100 — OPTICAL_FLOW** (payload = 26 bytes)
+
+| Offset in payload | Type    | Field     | Unit   | Notes |
+|-------------------|---------|-----------|--------|-------|
+| 0–3               | float   | time_usec | (unused) | |
+| 4–5               | int16   | flow_comp_m_x | (unused) | |
+| 6–7               | int16   | flow_comp_m_y | (unused) | |
+| 8–11              | float   | ground_distance | (unused) | |
+| 12–13             | int16   | flow_x    | dpix/s | raw optical flow X |
+| 14–15             | int16   | flow_y    | dpix/s | raw optical flow Y |  
+| 16                | uint8   | sensor_id | (unused) | |
+| 17                | uint8   | quality   | 0–255  | flow confidence |
+
+Wait, I need to cross-check. Let me use the exact offsets you provided:
+- flowX: int16 at payload bytes 20–21
+- flowY: int16 at payload bytes 22–23
+- quality: uint8 at payload byte 25
+
+| Offset in payload | Type   | Field   | Used | Notes |
+|-------------------|--------|---------|------|-------|
+| 0–19              | —      | (various) | No | ignored |
+| 20–21             | int16  | flow_x  | Yes | raw optical flow X, dpix/s |
+| 22–23             | int16  | flow_y  | Yes | raw optical flow Y, dpix/s |
+| 24                | —      | —       | No  | ignored |
+| 25                | uint8  | quality | Yes | 0 = no confidence, 255 = max |
+
+CRC extra byte: **175** (0xAF)
+
+---
+
+**MSG ID 132 — DISTANCE_SENSOR** (payload = 14 bytes)
+
+| Offset in payload | Type   | Field            | Used | Notes |
+|-------------------|--------|------------------|------|-------|
+| 0–7               | —      | (various)        | No   | ignored |
+| 8–9               | uint16 | current_distance | Yes  | in centimetres |
+| 10–13             | —      | (various)        | No   | ignored |
+
+Conversion: `distance_m = current_distance * 0.01f`
+
+CRC extra byte: **85** (0x55)
+
+---
+
+#### 5.5.3 CRC16-X25 calculation
+
+The checksum covers bytes `[LEN, SEQ, SYSID, COMPID, MSGID, PAYLOAD...]` (everything after STX, excluding the CRC bytes themselves), followed by one **message-specific extra byte** (also called `MAVLINK_MSG_CRC` or magic CRC):
+
+```
+crc = crc16_x25_init()           // 0xFFFF
+for each byte b in [LEN..PAYLOAD]:
+    crc = crc16_x25_update(crc, b)
+crc = crc16_x25_update(crc, extra_byte)   // 175 for MSG 100, 85 for MSG 132
+```
+
+CRC16-X25 polynomial: `0x1021`, reflected (LSB-first), init `0xFFFF`.
+The two CRC bytes in the frame are stored **little-endian** (CRC_L first, CRC_H second).
+
+#### 5.5.4 Parser state machine
+
+The parser processes incoming bytes one at a time using an 8-state machine:
+
+```
+WAIT_STX → LEN → SEQ → SYSID → COMPID → MSGID → PAYLOAD → CRC_L → CRC_H
+              ↑                                                         |
+              └──────────────── bad CRC or unknown MSGID ──────────────┘
+                                (reset to WAIT_STX)
+```
+
+| State    | Action |
+|----------|--------|
+| `WAIT_STX` | Wait for byte `0xFE`; advance to `LEN` |
+| `LEN`    | Store payload length; reject if > 255; advance to `SEQ`; reset CRC accumulator and feed `LEN` into it |
+| `SEQ`    | Store seq; feed into CRC; advance to `SYSID` |
+| `SYSID`  | Store sysid; feed into CRC; advance to `COMPID` |
+| `COMPID` | Store compid; feed into CRC; advance to `MSGID` |
+| `MSGID`  | Store msgid; feed into CRC; if msgid ∉ {100, 132}: reset to `WAIT_STX`; else advance to `PAYLOAD` |
+| `PAYLOAD`| Accumulate bytes into a fixed 26-byte buffer; feed into CRC; after `LEN` bytes advance to `CRC_L` |
+| `CRC_L`  | Store low CRC byte; advance to `CRC_H` |
+| `CRC_H`  | Store high CRC byte; feed extra byte into CRC; compare with accumulated CRC; on match dispatch message; reset to `WAIT_STX` |
+
+Payload buffer is always 26 bytes (size of the largest message). Bytes beyond the declared `LEN` are never read.
+
+#### 5.5.5 Output and rate
+
+On each valid frame:
+- **MSG 100**: update `flow_x`, `flow_y`, `quality` in the latest `Mtf01Data` snapshot
+- **MSG 132**: update `distance_m` in the latest `Mtf01Data` snapshot
+- After either update, set a `newData` flag
+
+The MTF-01 sends both messages at approximately 50 Hz each. The `Mtf01Reader::update()` method drains the UART ring buffer and calls the state machine for every available byte. The GCS packet `PKT_MTF01 (0x03)` is built and sent whenever `newData` is true.
+
+#### 5.5.6 Interface (`Mtf01Reader` class)
+
+```cpp
+class Mtf01Reader {
+public:
+    void begin(HardwareSerial& serial, uint32_t baud); // call once in setup()
+    void update();           // drain UART RX buffer, run state machine
+    bool     newData() const;
+    float    distance() const;   // metres
+    int16_t  flowX()    const;   // dpix/s
+    int16_t  flowY()    const;   // dpix/s
+    uint8_t  quality()  const;   // 0–255
+};
+```
 
 ---
 
