@@ -38,7 +38,11 @@ It plays two roles simultaneously:
 The UDP packet format is **identical** to the one used by the GCS.
 The authoritative struct definitions live in `common/Protocol.h` at the repository root and are included directly by both the GCS and the ESP32 firmware — there is only one copy.
 
-The ESP32 build system must add `<repo_root>/common` to the include path so that `#include "Protocol.h"` resolves to this shared file.
+In the Arduino sketch, the file is included via a relative path:
+```cpp
+#include "../../../common/Protocol.h"
+```
+
 Any change to `common/Protocol.h` affects both projects simultaneously.
 
 See `common/Protocol.h` and `requirements/REQUIREMENTS.md` §4 for the full packet specification.
@@ -56,7 +60,10 @@ See `common/Protocol.h` and `requirements/REQUIREMENTS.md` §4 for the full pack
 | SCK    | 14   |
 | CS     | 27   |
 
-The FC is the **SPI master**. The ESP32 is the **SPI slave**.
+- Bus: **SPI2\_HOST (HSPI)**
+- Mode: **0** (CPOL=0, CPHA=0) — must match the FC master configuration
+- Frame size: **256 bytes fixed** in both directions
+- The FC is the **SPI master**. The ESP32 is the **SPI slave**.
 
 **Direction:**
 - FC → ESP32 (MOSI): attitude quaternion, gyro, accel, motor states, FSM state (high-frequency telemetry)
@@ -118,11 +125,38 @@ The FC is the **SPI master**. The ESP32 is the **SPI slave**.
 
 ## 4. WiFi & UDP
 
-- Mode: **Station (STA)** — connects to a known WiFi network (SSID + password stored in config)
-- GCS IP and port: configurable (default port 5005)
-- The ESP32 discovers the GCS by sending telemetry to the configured GCS address
-- Commands from the GCS arrive on the same UDP socket (source port = GCS port)
-- Connection considered lost if no UDP keepalive/command is received for 2 s (optional heartbeat)
+### 4.1 Connection strategy
+
+1. On boot, attempt to join the configured WiFi network (STA mode). Timeout: **10 seconds**.
+2. If connection fails, fall back to **Access Point mode**:
+   - SSID: `MicroFlight-ESP32`
+   - Password: `microflight`
+   - ESP32 IP in AP mode: `192.168.4.1`
+
+### 4.2 UDP transmission
+
+- Telemetry is sent to the **subnet broadcast address** (e.g. `192.168.1.255`) on port **5005**.
+- The broadcast approach removes the need to configure the GCS IP — any GCS on the same network receives the packets.
+- In AP mode, broadcasts go to `192.168.4.255`.
+
+### 4.3 Heartbeat (no FC connected)
+
+When the SPI link to the FC is inactive, the ESP32 still sends two packets per second to keep the GCS alive:
+
+| Packet | Rate | Content |
+|--------|------|---------|
+| `PKT_STATUS` | 1 Hz | `state = "NO-FC"` (or `"SPI-ERR"` if init failed), `wifi_rssi` mapped from dBm |
+| `PKT_LOG`    | 1 Hz | SPI throughput stats: `[SPI] att=0/s  sta=0/s  other=0/s` |
+
+### 4.4 Credentials
+
+WiFi credentials are stored in `Secrets.h` in the sketch folder. This file is listed in `.gitignore` and must never be committed. A `Secrets.h.example` template is versioned instead.
+
+```cpp
+// Secrets.h
+static const char* WIFI_SSID     = "your_network";
+static const char* WIFI_PASSWORD = "your_password";
+```
 
 ---
 
@@ -136,79 +170,111 @@ Framework: **Arduino Core for ESP32** (provides `setup()` / `loop()`, hardware d
 All concurrency is handled with:
 - **Hardware interrupts (ISR)** — SPI slave CS edge, UART RX for GPS / MTF-01 / S.Bus
 - **Ring buffers** — ISRs write raw bytes; `loop()` drains and parses
-- **Non-blocking polling** — each driver exposes a `update()` method called every loop iteration; no busy-wait, no blocking I/O
+- **Non-blocking polling** — each driver exposes an `update()` method called every loop iteration; no busy-wait, no blocking I/O
 
 `loop()` executes at the fastest possible rate (~100 Hz target). Each subsystem is called in sequence:
 
 ```
 loop()
-├── spi_slave.update()     // drain SPI RX ring buffer, parse FC frame
-├── gps.update()           // drain GPS UART ring buffer, parse NMEA/UBX
-├── mtf01.update()         // drain MTF-01 UART ring buffer
-├── sbus.update()          // drain S.Bus UART ring buffer, decode frame
-├── baro.update()          // I2C poll if 100 ms elapsed (10 Hz)
-├── udp_rx.update()        // receive pending GCS commands (non-blocking)
-└── udp_tx.update()        // send pending telemetry packets (rate-limited per type)
+├── g_spi.update()         // drain completed SPI transaction; forward PKT_ATTITUDE to GCS
+├── gps.update()           // drain GPS UART ring buffer, parse NMEA/UBX      [not yet impl.]
+├── mtf01.update()         // drain MTF-01 UART ring buffer                   [not yet impl.]
+├── sbus.update()          // drain S.Bus UART ring buffer, decode frame       [not yet impl.]
+├── baro.update()          // I2C poll if 100 ms elapsed (10 Hz)              [not yet impl.]
+├── udp_rx.update()        // receive pending GCS commands (non-blocking)     [not yet impl.]
+└── [1 Hz] sendStatus() + sendLog()   // heartbeat — always runs
 ```
 
 ### 5.2 Module List
 
-| Module | File | Role |
-|--------|------|------|
-| `SpiSlave`   | `spi_slave.h/.cpp`  | SPI slave ISR + frame parser; exposes latest FC telemetry |
-| `GpsReader`  | `gps_reader.h/.cpp` | UART2 NMEA/UBX parser; exposes `GpsData` |
-| `Mtf01Reader`| `mtf01.h/.cpp`      | UART1 binary parser; exposes `Mtf01Data` |
-| `SbusReader` | `sbus.h/.cpp`       | UART0 inverted, S.Bus frame decoder; exposes `RadioData` |
-| `BaroReader` | `baro.h/.cpp`       | I2C poller (BMP280/388/MS5611); exposes `BaroData` |
-| `UdpTx`      | `udp_tx.h/.cpp`     | Rate-limited packet builder and sender |
-| `UdpRx`      | `udp_rx.h/.cpp`     | Non-blocking command receiver; writes pending command to SPI MISO buffer |
-| `Config`     | `config.h/.cpp`     | NVS read/write for all configurable parameters |
+| Module | File | Status | Role |
+|--------|------|--------|------|
+| `SpiSlave`    | `SpiSlave.h/.cpp`   | ✅ Implemented | SPI slave driver; parses FC frames, exposes telemetry, holds pending commands |
+| `GpsReader`   | `gps_reader.h/.cpp` | ⬜ Planned | UART2 NMEA/UBX parser; exposes `GpsData` |
+| `Mtf01Reader` | `Mtf01Reader.h/.cpp`| ⬜ Planned | UART1 MAVLink v1 parser; exposes `Mtf01Data` |
+| `SbusReader`  | `sbus.h/.cpp`       | ⬜ Planned | UART0 inverted, S.Bus frame decoder; exposes `RadioData` |
+| `BaroReader`  | `baro.h/.cpp`       | ⬜ Planned | I2C poller (BMP280/388/MS5611); exposes `BaroData` |
+| `UdpRx`       | *(in .ino)*         | ⬜ Planned | Non-blocking command receiver; calls `SpiSlave::setPendingCommand()` |
 
-### 5.2 Packet Send Rates
+### 5.3 Packet Send Rates
 
-| Packet | Rate | Source |
-|--------|------|--------|
-| `PKT_ATTITUDE (0x01)` | 100 Hz | FC via SPI |
-| `PKT_GPS (0x02)`      | 10 Hz  | GPS UART |
-| `PKT_MTF01 (0x03)`    | 50 Hz  | MTF-01 UART |
-| `PKT_RADIO (0x04)`    | 50 Hz  | S.Bus UART |
-| `PKT_STATUS (0x05)`   | 10 Hz  | FC via SPI |
-| `PKT_PID (0x06)`      | 1 Hz   | FC via SPI (on change) |
-| `PKT_LOG (0x07)`      | On event | FC via SPI or ESP32 internal |
-| `PKT_BARO (0x08)`     | 10 Hz  | Barometer I2C |
-| `PKT_CALIB_STATUS (0x09)` | On event | FC via SPI |
+| Packet | Rate | Source | Status |
+|--------|------|--------|--------|
+| `PKT_ATTITUDE (0x01)` | 100 Hz | FC via SPI | ✅ Implemented |
+| `PKT_GPS (0x02)`      | 10 Hz  | GPS UART | ⬜ Planned |
+| `PKT_MTF01 (0x03)`    | 50 Hz  | MTF-01 UART | ⬜ Planned |
+| `PKT_RADIO (0x04)`    | 50 Hz  | S.Bus UART | ⬜ Planned |
+| `PKT_STATUS (0x05)`   | 10 Hz (FC) / 1 Hz (heartbeat) | FC via SPI / ESP32 internal | ✅ Heartbeat implemented |
+| `PKT_PID (0x06)`      | 1 Hz   | FC via SPI | ⬜ Planned |
+| `PKT_LOG (0x07)`      | On event / 1 Hz heartbeat | FC via SPI / ESP32 internal | ✅ Heartbeat implemented |
+| `PKT_BARO (0x08)`     | 10 Hz  | Barometer I2C | ⬜ Planned |
+| `PKT_CALIB_STATUS (0x09)` | On event | FC via SPI | ⬜ Planned |
 
-### 5.3 Command Forwarding (GCS → FC)
+### 5.4 Command Forwarding (GCS → FC)
 
 | Packet received from GCS | Action |
 |--------------------------|--------|
 | `PKT_SET_PID (0x10)`     | Write into SPI MISO buffer; FC reads it on next SPI transaction |
 | `PKT_CALIB_CMD (0x20)`   | Same — write into SPI MISO buffer |
 
-The ESP32 sends an `PKT_ACK (0x11)` back to the GCS once the command has been transferred to the FC (or immediately upon receipt, depending on FC handshake design — TBD).
+`SpiSlave::setPendingCommand()` is implemented and ready. UDP RX (receiving commands from the GCS) is not yet wired up.
 
-### 5.4 SPI Slave Protocol (FC ↔ ESP32)
+The ESP32 will send `PKT_ACK (0x11)` back to the GCS immediately upon receiving a command (before the FC confirms it).
 
-The SPI frame format between FC and ESP32 is a **separate, lower-level protocol** (not the GCS UDP protocol). It is to be defined, but must convey:
+### 5.5 SPI Slave Protocol (FC ↔ ESP32)
 
-**FC → ESP32 (MOSI, each SPI transaction):**
-- Attitude quaternion + gyro + accel
-- Motor states
-- FSM state string
-- Battery voltage/current/percent
-- Calibration status (per target)
-- PID values (periodically)
-- Log messages (on event)
+The SPI frame format is defined in `SpiFrame.h` (in the sketch folder). It is a **separate, lower-level protocol** from the GCS UDP protocol.
 
-**ESP32 → FC (MISO, piggy-backed on each transaction):**
-- Pending GCS command (if any): type + payload (PID update or CalibCmd)
-- Command present flag (1 bit or first byte) to avoid FC parsing stale data
+Both directions use **256-byte fixed frames** so the FC always clocks the exact same number of bytes per transaction.
+
+#### 5.5.1 FC → ESP32 frame (MOSI)
+
+```
+[SpiFrameHeader 4B] [payload up to 248B] [CRC16 2B] [pad 2B]
+```
+
+**`SpiFrameHeader` (4 bytes):**
+
+| Field | Type | Value |
+|-------|------|-------|
+| `magic` | uint16 | `0xBEEF` |
+| `type` | uint8 | Frame type (see below) |
+| `payload_len` | uint8 | Valid bytes after the header |
+
+**Frame types:**
+
+| Type | Value | Rate | Payload struct |
+|------|-------|------|----------------|
+| `Attitude`    | 0x01 | 100 Hz   | `SpiPayloadAttitude` (40 B): qw, qx, qy, qz, gx, gy, gz, ax, ay, az |
+| `Status`      | 0x02 |  10 Hz   | `SpiPayloadStatus` (50 B): battery V/A/%, state[32], motor_percent[8], wifi_rssi |
+| `Pid`         | 0x03 |   1 Hz   | `SpiPayloadPid` (108 B): 9 × PidAxis (kp, ki, kd) |
+| `CalibStatus` | 0x04 | on event | `SpiPayloadCalibStatus` (67 B): target, status, progress, message[64] |
+| `Log`         | 0x05 | on event | `SpiPayloadLog` (129 B): level, text[128] |
+
+CRC covers `sizeof(SpiFrameHeader) + payload_len` bytes, using CRC-16/CCITT (poly 0x1021, init 0xFFFF).
+
+#### 5.5.2 ESP32 → FC frame (MISO)
+
+```
+[magic 2B] [has_cmd 1B] [cmd_type 1B] [cmd payload 27B] [CRC16 2B] [pad 223B]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `magic` | uint16 | `0xCAFE` |
+| `has_cmd` | uint8 | `1` = a GCS command is present; FC ignores `cmd` if `0` |
+| `cmd_type` | uint8 | `PKT_SET_PID (0x10)` or `PKT_CALIB_CMD (0x20)` |
+| `cmd` | union[27B] | Raw packet bytes (header + payload + CRC) sized to the largest command |
+| `crc` | uint16 | CRC-16/CCITT over `magic + has_cmd + cmd_type + cmd` |
+| `pad` | uint8[223] | Zero-padding to reach 256 bytes |
+
+The pending command is cleared from the MISO buffer immediately after being clocked out (i.e. on the same `buildTxFrame()` call that includes it).
 
 ---
 
-### 5.5 MTF-01 MAVLink v1 Parser
+### 5.6 MTF-01 MAVLink v1 Parser
 
-#### 5.5.1 Wire format
+#### 5.6.1 Wire format
 
 The MTF-01 speaks **MAVLink v1** at 115200 baud, 8N1 on UART (GPIO 25 RX / 26 TX).
 Each MAVLink v1 frame has the following byte layout:
@@ -222,34 +288,18 @@ Offset  Size  Field
   4      1    COMPID— component ID of the sender
   5      1    MSGID — message type identifier
   6    LEN    PAYLOAD
-6+LEN    2    CRC   — little-endian CRC16-X25 (see §5.5.3)
+6+LEN    2    CRC   — little-endian CRC16-X25 (see §5.6.3)
 ```
 
 Total frame size: `LEN + 8` bytes.
 
-#### 5.5.2 Relevant message types
+#### 5.6.2 Relevant message types
 
 Only two message IDs are parsed; all others are discarded.
 
 ---
 
 **MSG ID 100 — OPTICAL_FLOW** (payload = 26 bytes)
-
-| Offset in payload | Type    | Field     | Unit   | Notes |
-|-------------------|---------|-----------|--------|-------|
-| 0–3               | float   | time_usec | (unused) | |
-| 4–5               | int16   | flow_comp_m_x | (unused) | |
-| 6–7               | int16   | flow_comp_m_y | (unused) | |
-| 8–11              | float   | ground_distance | (unused) | |
-| 12–13             | int16   | flow_x    | dpix/s | raw optical flow X |
-| 14–15             | int16   | flow_y    | dpix/s | raw optical flow Y |  
-| 16                | uint8   | sensor_id | (unused) | |
-| 17                | uint8   | quality   | 0–255  | flow confidence |
-
-Wait, I need to cross-check. Let me use the exact offsets you provided:
-- flowX: int16 at payload bytes 20–21
-- flowY: int16 at payload bytes 22–23
-- quality: uint8 at payload byte 25
 
 | Offset in payload | Type   | Field   | Used | Notes |
 |-------------------|--------|---------|------|-------|
@@ -277,12 +327,12 @@ CRC extra byte: **85** (0x55)
 
 ---
 
-#### 5.5.3 CRC16-X25 calculation
+#### 5.6.3 CRC16-X25 calculation
 
-The checksum covers bytes `[LEN, SEQ, SYSID, COMPID, MSGID, PAYLOAD...]` (everything after STX, excluding the CRC bytes themselves), followed by one **message-specific extra byte** (also called `MAVLINK_MSG_CRC` or magic CRC):
+The checksum covers bytes `[LEN, SEQ, SYSID, COMPID, MSGID, PAYLOAD...]` (everything after STX, excluding the CRC bytes themselves), followed by one **message-specific extra byte**:
 
 ```
-crc = crc16_x25_init()           // 0xFFFF
+crc = 0xFFFF
 for each byte b in [LEN..PAYLOAD]:
     crc = crc16_x25_update(crc, b)
 crc = crc16_x25_update(crc, extra_byte)   // 175 for MSG 100, 85 for MSG 132
@@ -291,7 +341,7 @@ crc = crc16_x25_update(crc, extra_byte)   // 175 for MSG 100, 85 for MSG 132
 CRC16-X25 polynomial: `0x1021`, reflected (LSB-first), init `0xFFFF`.
 The two CRC bytes in the frame are stored **little-endian** (CRC_L first, CRC_H second).
 
-#### 5.5.4 Parser state machine
+#### 5.6.4 Parser state machine
 
 The parser processes incoming bytes one at a time using an 8-state machine:
 
@@ -302,21 +352,21 @@ WAIT_STX → LEN → SEQ → SYSID → COMPID → MSGID → PAYLOAD → CRC_L �
                                 (reset to WAIT_STX)
 ```
 
-| State    | Action |
-|----------|--------|
+| State      | Action |
+|------------|--------|
 | `WAIT_STX` | Wait for byte `0xFE`; advance to `LEN` |
-| `LEN`    | Store payload length; reject if > 255; advance to `SEQ`; reset CRC accumulator and feed `LEN` into it |
-| `SEQ`    | Store seq; feed into CRC; advance to `SYSID` |
-| `SYSID`  | Store sysid; feed into CRC; advance to `COMPID` |
-| `COMPID` | Store compid; feed into CRC; advance to `MSGID` |
-| `MSGID`  | Store msgid; feed into CRC; if msgid ∉ {100, 132}: reset to `WAIT_STX`; else advance to `PAYLOAD` |
-| `PAYLOAD`| Accumulate bytes into a fixed 26-byte buffer; feed into CRC; after `LEN` bytes advance to `CRC_L` |
-| `CRC_L`  | Store low CRC byte; advance to `CRC_H` |
-| `CRC_H`  | Store high CRC byte; feed extra byte into CRC; compare with accumulated CRC; on match dispatch message; reset to `WAIT_STX` |
+| `LEN`      | Store payload length; reset CRC accumulator and feed `LEN` into it; advance to `SEQ` |
+| `SEQ`      | Store seq; feed into CRC; advance to `SYSID` |
+| `SYSID`    | Store sysid; feed into CRC; advance to `COMPID` |
+| `COMPID`   | Store compid; feed into CRC; advance to `MSGID` |
+| `MSGID`    | Store msgid; feed into CRC; if msgid ∉ {100, 132}: reset to `WAIT_STX`; else advance to `PAYLOAD` |
+| `PAYLOAD`  | Accumulate bytes into a fixed 26-byte buffer; feed into CRC; after `LEN` bytes advance to `CRC_L` |
+| `CRC_L`    | Store low CRC byte; advance to `CRC_H` |
+| `CRC_H`    | Store high CRC byte; feed extra byte into CRC; compare with accumulated CRC; on match dispatch message; reset to `WAIT_STX` |
 
 Payload buffer is always 26 bytes (size of the largest message). Bytes beyond the declared `LEN` are never read.
 
-#### 5.5.5 Output and rate
+#### 5.6.5 Output and rate
 
 On each valid frame:
 - **MSG 100**: update `flow_x`, `flow_y`, `quality` in the latest `Mtf01Data` snapshot
@@ -325,7 +375,7 @@ On each valid frame:
 
 The MTF-01 sends both messages at approximately 50 Hz each. The `Mtf01Reader::update()` method drains the UART ring buffer and calls the state machine for every available byte. The GCS packet `PKT_MTF01 (0x03)` is built and sent whenever `newData` is true.
 
-#### 5.5.6 Interface (`Mtf01Reader` class)
+#### 5.6.6 Interface (`Mtf01Reader` class)
 
 ```cpp
 class Mtf01Reader {
@@ -344,26 +394,24 @@ public:
 
 ## 6. Configuration
 
-The following parameters must be configurable without recompiling (stored in NVS / EEPROM):
+WiFi credentials are stored in `Secrets.h` (not versioned — see §4.4). All other parameters are compile-time constants in the sketch for now; NVS-based runtime configuration is a future improvement.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| WiFi SSID | — | Network to connect to |
-| WiFi password | — | Network password |
-| GCS IP | 0.0.0.0 (broadcast) | Target IP for UDP datagrams |
-| GCS port | 5005 | Target UDP port |
-| GPS baud rate | 115200 | Matches GPS module config |
-| MTF-01 baud rate | TBD | Matches sensor config |
-| Barometer I2C address | 0x76 | BMP280 default; 0x77 if SDO pulled high |
+| Parameter | Current approach | Future |
+|-----------|-----------------|--------|
+| WiFi SSID / password | `Secrets.h` (compile-time) | NVS |
+| GCS IP | Subnet broadcast (automatic) | NVS |
+| GCS port | Hardcoded `5005` | NVS |
+| GPS baud rate | Hardcoded | NVS |
+| Barometer I2C address | Hardcoded `0x76` | NVS |
 
 ---
 
 ## 7. Non-Functional Requirements
 
-- All sensor reads and SPI transactions must be **non-blocking** relative to the UDP transmit task
-- The WiFi stack must not starve sensor tasks — use FreeRTOS task priorities accordingly
-- Watchdog timer enabled: reset if `task_udp_tx` stalls for more than 2 s
+- All sensor reads and SPI transactions must be **non-blocking** — `loop()` must never block
+- SPI slave initialisation failure is **non-fatal**: the firmware continues and sends UDP heartbeats
 - Serial monitor (USB UART) outputs human-readable status at 1 Hz for debugging
-- Firmware built with **Arduino Core for ESP32**, C++17, bare metal (no FreeRTOS)
+- Firmware built with **Arduino Core for ESP32**, C++17, bare metal (no FreeRTOS tasks)
+- Brace style: **Allman** — see `CODING_STYLE.md` at the repository root
 
 ---
