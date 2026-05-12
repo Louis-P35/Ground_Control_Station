@@ -71,8 +71,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
         return true;
     }
 
-    // Track sequence numbers for types 0x01–0x08
-    if (hdr->type >= 0x01 && hdr->type <= 0x08)
+    // Track sequence numbers for types 0x01–0x09
+    if (hdr->type >= 0x01 && hdr->type <= 0x09)
         trackSeq(hdr->type, hdr->seq);
 
     // Dispatch by type
@@ -169,6 +169,14 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             emit baroReceived(d);
             break;
         }
+        case PKT_CALIB_STATUS: {
+            if (totalSize < static_cast<int>(sizeof(PktCalibStatus))) break;
+            PktCalibStatus p; std::memcpy(&p, pkt, sizeof(p));
+            p.message[63] = '\0'; // Ensure null-termination
+            emit calibStatusReceived(p.target, p.status, p.progress,
+                                     QString::fromUtf8(p.message));
+            break;
+        }
         case PKT_ACK: {
             if (totalSize < static_cast<int>(sizeof(PktAck))) break;
             PktAck p; std::memcpy(&p, pkt, sizeof(p));
@@ -189,7 +197,7 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
 // Sequence tracking
 // ---------------------------------------------------------------------------
 void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
-    if (type == 0 || type > 8) return;
+    if (type == 0 || type > 9) return;
     auto& t = m_seqTracker[type];
     if (t.first) {
         t.lastSeq = seq;
@@ -205,7 +213,7 @@ void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
 }
 
 float PacketParser::packetLoss(uint8_t type) const {
-    if (type == 0 || type > 8) return 0.0f;
+    if (type == 0 || type > 9) return 0.0f;
     const auto& t = m_seqTracker[type];
     if (t.expected == 0) return 0.0f;
     float loss = 1.0f - static_cast<float>(t.received) / static_cast<float>(t.expected);

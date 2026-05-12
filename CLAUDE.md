@@ -39,6 +39,12 @@ The project follows a **strict MVC separation**:
 All packets: 12-byte header (`0xABCD`, version, type, timestamp, seq, payload_len) + CRC-16/CCITT.
 Full struct definitions in `src/backend/Protocol.h` and `requirements/REQUIREMENTS.md`.
 
+## Coding style
+
+Read **`CODING_STYLE.md`** (at the repo root) before writing or modifying any C++ file.
+The most important rule: **Allman brace style** — opening brace always on its own line,
+for every construct (functions, classes, `if`, `for`, `while`, `switch`, lambdas, …).
+
 ## Comments
 
 The code must be well commented. Add comments freely wherever they bring value: non-obvious logic, protocol details, OpenGL math, thread-safety invariants, design decisions. The only exception is when the code is already fully self-explanatory through good naming — in that case, a comment that merely restates what the code does adds no value and should be omitted. When in doubt, prefer to comment.

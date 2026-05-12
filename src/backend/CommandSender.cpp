@@ -59,12 +59,30 @@ void CommandSender::onRetryTimer() {
 }
 
 void CommandSender::onAckReceived(uint8_t ackType, uint16_t ackSeq, uint8_t /*success*/) {
-    if (ackType == PKT_SET_PID)
+    if (ackType == PKT_SET_PID || ackType == PKT_CALIB_CMD)
         m_pending.remove(ackSeq);
 }
 
+void CommandSender::sendCalibCmd(uint8_t target, uint8_t action) {
+    uint16_t seq = ++m_seqCounter;
+    QByteArray data = buildCalibCmd(target, action, seq);
+
+    PendingCmd cmd;
+    cmd.data        = data;
+    cmd.retriesLeft = MAX_RETRIES;
+    cmd.seq         = seq;
+    m_pending[seq]  = cmd;
+
+    AppLogger::info(QString("CommandSender: CalibCmd sent target=%1 action=%2 seq=%3")
+                    .arg(target).arg(action).arg(seq));
+    m_link->sendDatagram(data);
+
+    if (!m_retryTimer->isActive())
+        m_retryTimer->start();
+}
+
 // ---------------------------------------------------------------------------
-// Packet builder
+// Packet builders
 // ---------------------------------------------------------------------------
 uint16_t CommandSender::crc16(const uint8_t* data, int len) {
     uint16_t crc = 0xFFFF;
@@ -74,6 +92,25 @@ uint16_t CommandSender::crc16(const uint8_t* data, int len) {
             crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
     }
     return crc;
+}
+
+QByteArray CommandSender::buildCalibCmd(uint8_t target, uint8_t action, uint16_t seq) {
+    PktCalibCmd pkt{};
+    pkt.header.magic        = PACKET_MAGIC;
+    pkt.header.version      = PACKET_VERSION;
+    pkt.header.type         = PKT_CALIB_CMD;
+    pkt.header.timestamp_us = 0;
+    pkt.header.seq          = seq;
+    pkt.header.payload_len  = sizeof(PktCalibCmd) - sizeof(PacketHeader) - sizeof(uint16_t);
+    pkt.target = target;
+    pkt.action = action;
+
+    int crcLen = sizeof(PacketHeader) + pkt.header.payload_len;
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt), crcLen);
+
+    QByteArray out(sizeof(PktCalibCmd), Qt::Uninitialized);
+    std::memcpy(out.data(), &pkt, sizeof(PktCalibCmd));
+    return out;
 }
 
 QByteArray CommandSender::buildSetPid(PidAxisId axis, float kp, float ki, float kd, uint16_t seq) {
