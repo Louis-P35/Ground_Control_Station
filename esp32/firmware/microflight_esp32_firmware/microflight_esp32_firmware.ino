@@ -3,8 +3,9 @@
 #include <cstring>
 
 #include "../../../common/Protocol.h"
-#include "Secrets.h"   // WIFI_SSID, WIFI_PASSWORD — not versioned
+#include "Secrets.h"      // WIFI_SSID, WIFI_PASSWORD — not versioned
 #include "SpiSlave.h"
+#include "Mtf01Reader.h"
 
 // ---------------------------------------------------------------------------
 // Network configuration
@@ -24,9 +25,10 @@ static const uint16_t LOCAL_PORT      = 5005;
 // Globals
 // ---------------------------------------------------------------------------
 
-static SpiSlave  g_spi;
-static WiFiUDP   g_udp;
-static IPAddress g_broadcastIp;
+static SpiSlave    g_spi;
+static Mtf01Reader g_mtf01;
+static WiFiUDP     g_udp;
+static IPAddress   g_broadcastIp;
 
 // Per-type sequence counters (one per PKT_* type, indexed by type byte)
 static uint16_t g_seqs[0x21] = {};
@@ -92,6 +94,24 @@ static void sendAttitude(const SpiPayloadAttitude& d)
     pkt.qw = d.qw; pkt.qx = d.qx; pkt.qy = d.qy; pkt.qz = d.qz;
     pkt.gx = d.gx; pkt.gy = d.gy; pkt.gz = d.gz;
     pkt.ax = d.ax; pkt.ay = d.ay; pkt.az = d.az;
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// sendMtf01 — forward MTF-01 data as PKT_MTF01 to the GCS
+// ---------------------------------------------------------------------------
+
+static void sendMtf01(const Mtf01Reader& mtf)
+{
+    PktMtf01 pkt{};
+    fillHeader(pkt.header, PKT_MTF01,
+               sizeof(PktMtf01) - sizeof(PacketHeader) - sizeof(uint16_t));
+    pkt.distance_m = mtf.distance();
+    pkt.flow_x     = static_cast<float>(mtf.flowX());
+    pkt.flow_y     = static_cast<float>(mtf.flowY());
+    pkt.quality    = mtf.quality();
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
     sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
@@ -187,7 +207,11 @@ void setup()
     // ── SPI slave ─────────────────────────────────────────────────────────────
     g_spi.begin();
 
-    sendLog("[ESP32] Boot complete — SPI slave active");
+    // ── MTF-01 (Serial1, GPIO 25 RX / 26 TX, 115200 baud) ───────────────────
+    g_mtf01.begin(Serial1, 115200, 25, 26);
+    Serial.println("[MTF01] Reader started — Serial1 RX=25 TX=26 @ 115200");
+
+    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 active");
     Serial.println("[MAIN] All subsystems ready");
 }
 
@@ -197,6 +221,13 @@ void setup()
 
 void loop()
 {
+    // ── MTF-01: drain UART RX buffer and parse MAVLink frames ────────────────
+    g_mtf01.update();
+    if (g_mtf01.newData())
+    {
+        sendMtf01(g_mtf01);
+    }
+
     // ── SPI: drain one completed transaction per call ─────────────────────────
     if (g_spi.update())
     {
