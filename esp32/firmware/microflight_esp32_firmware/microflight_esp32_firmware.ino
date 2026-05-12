@@ -98,6 +98,25 @@ static void sendAttitude(const SpiPayloadAttitude& d)
 }
 
 // ---------------------------------------------------------------------------
+// sendStatus — broadcast a PKT_STATUS heartbeat to keep the GCS "connected"
+// When no FC is linked via SPI, state = "NO-FC" and battery fields are zero.
+// ---------------------------------------------------------------------------
+
+static void sendStatus(const char* state)
+{
+    PktStatus pkt{};
+    fillHeader(pkt.header, PKT_STATUS,
+               sizeof(PktStatus) - sizeof(PacketHeader) - sizeof(uint16_t));
+    strncpy(pkt.state, state, sizeof(pkt.state) - 1);
+    // Map WiFi RSSI from dBm (e.g. -70) to 0–100
+    int rssiDbm = WiFi.RSSI();
+    pkt.wifi_rssi = (uint8_t)max(0, min(100, (rssiDbm + 100) * 2));
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
 // sendLog — broadcast a PKT_LOG packet to the GCS
 // ---------------------------------------------------------------------------
 
@@ -212,7 +231,11 @@ void loop()
                       ESP.getFreeHeap(),
                       g_cntAttitude, g_cntStatus, g_cntOther);
 
-        // PKT_LOG to GCS
+        // PKT_STATUS — keeps the GCS "connected" indicator green
+        const char* fcState = g_spi.isInitialized() ? "NO-FC" : "SPI-ERR";
+        sendStatus(fcState);
+
+        // PKT_LOG — SPI throughput stats visible in the GCS terminal
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "[SPI] att=%lu/s  sta=%lu/s  other=%lu/s",

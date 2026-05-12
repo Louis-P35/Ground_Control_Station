@@ -22,8 +22,8 @@ void SpiSlave::begin()
     m_txBuf = static_cast<uint8_t*>(heap_caps_malloc(SPI_FRAME_SIZE, MALLOC_CAP_DMA));
     if (!m_rxBuf || !m_txBuf)
     {
-        Serial.println("[SPI] FATAL: DMA buffer allocation failed — halting");
-        while (true) { delay(1000); }
+        Serial.println("[SPI] ERROR: DMA buffer allocation failed — SPI disabled");
+        return;
     }
     memset(m_rxBuf, 0, SPI_FRAME_SIZE);
 
@@ -46,10 +46,11 @@ void SpiSlave::begin()
     esp_err_t err = spi_slave_initialize(SPI2_HOST, &bus, &slv, SPI_DMA_CH_AUTO);
     if (err != ESP_OK)
     {
-        Serial.printf("[SPI] FATAL: init failed (%s) — halting\n", esp_err_to_name(err));
-        while (true) { delay(1000); }
+        Serial.printf("[SPI] ERROR: init failed (%s) — SPI disabled\n", esp_err_to_name(err));
+        return; // non-fatal: loop() continues and heartbeats are still sent
     }
 
+    m_initialized = true;
     buildTxFrame();        // fill MISO with "no command pending"
     queueNextTransaction();
     Serial.println("[SPI] Slave ready — HSPI mode 0, 256-byte frames");
@@ -63,6 +64,11 @@ void SpiSlave::begin()
 
 bool SpiSlave::update()
 {
+    if (!m_initialized)
+    {
+        return false;
+    }
+
     if (!m_transQueued)
     {
         buildTxFrame();

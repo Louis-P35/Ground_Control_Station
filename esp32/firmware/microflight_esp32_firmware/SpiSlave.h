@@ -28,6 +28,7 @@ class SpiSlave
 public:
     void begin();  // Call once in setup() — allocates DMA buffers, inits hardware
     bool update(); // Call every loop() — non-blocking; returns true when a frame was parsed
+    bool isInitialized() const { return m_initialized; }
 
     // ── Freshness flags — set on successful parse, cleared at next update() ───
     bool newAttitude()  const { return m_newAttitude; }
@@ -52,6 +53,8 @@ private:
     bool            parseRxFrame(const uint8_t* buf);
     void            buildTxFrame();
     static uint16_t crc16(const uint8_t* data, size_t len);
+
+    bool m_initialized = false; // false if spi_slave_initialize failed — slave runs headless
 
     // DMA-capable buffers — required by the ESP-IDF SPI slave driver
     uint8_t* m_rxBuf = nullptr;
