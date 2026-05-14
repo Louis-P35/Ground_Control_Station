@@ -12,6 +12,7 @@ Q_DECLARE_METATYPE(RadioData)
 Q_DECLARE_METATYPE(StatusData)
 Q_DECLARE_METATYPE(PidData)
 Q_DECLARE_METATYPE(BaroData)
+Q_DECLARE_METATYPE(FftData)
 
 namespace TestHelpers {
 

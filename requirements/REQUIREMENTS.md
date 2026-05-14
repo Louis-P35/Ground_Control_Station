@@ -105,6 +105,7 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x07` | Log / terminal text | On event |
 | `0x08` | Barometer (pressure, temperature, altitude) | 10 Hz |
 | `0x09` | Calibration status (per target) | On event |
+| `0x0A` | FFT spectrum (one sensor+axis per packet) | 2 Hz |
 
 #### 0x01 — Attitude
 ```cpp
@@ -226,6 +227,30 @@ struct PktCalibStatus {
 };
 ```
 
+#### 0x0A — FFT Spectrum
+One packet per sensor+axis combination (6 packets per update cycle at 2 Hz).
+The drone computes three parallel spectra so the GCS can visualise filter effectiveness.
+
+```cpp
+static constexpr uint16_t FFT_BIN_COUNT = 128; // Bins per array
+static constexpr uint8_t  FFT_SENSOR_ACCEL = 0, FFT_SENSOR_GYRO = 1;
+static constexpr uint8_t  FFT_AXIS_X = 0, FFT_AXIS_Y = 1, FFT_AXIS_Z = 2;
+
+struct PktFft {
+    PacketHeader header;
+    uint8_t  sensor;               // FFT_SENSOR_ACCEL or FFT_SENSOR_GYRO
+    uint8_t  axis;                 // FFT_AXIS_X, FFT_AXIS_Y, or FFT_AXIS_Z
+    uint16_t bin_count;            // Valid bins per array (≤ FFT_BIN_COUNT)
+    float    freq_resolution_hz;   // Hz per bin (= sample_rate / fft_size)
+    float    raw  [FFT_BIN_COUNT]; // Raw signal FFT magnitudes
+    float    notch[FFT_BIN_COUNT]; // Notch-filtered signal FFT magnitudes
+    float    full [FFT_BIN_COUNT]; // Notch+pass-filtered signal FFT magnitudes
+    uint16_t crc;
+};
+```
+
+Total packet size: 1558 bytes. All three filter stages share the same frequency axis.
+
 ### 4.3 GCS → Drone Packet Types
 
 | Type ID | Name |
@@ -323,6 +348,8 @@ Row stretch ratios: rows 0 and 1 weight 2, row 2 weight 3 (terminal gets more ve
 **Tab 4 — Settings**: PID configuration widget (`PidConfigWidget`) allowing tuning of all 9 PID axes (Rate, Attitude, Position). Values are sent to the drone on demand and updated automatically when `PktPidValues` is received.
 
 **Tab 5 — Calibration**: sensor calibration widget (`CalibrationWidget`) with three panels — Accelerometer, Magnetometer, Level/Attitude 0.
+
+**Tab 6 — FFT**: frequency spectrum viewer (`FftWidget`) showing the three filter-stage spectra (raw, notch, notch+pass) superimposed with different colours. A sensor toggle (Accel/Gyro) and an axis toggle (X/Y/Z) control which of the six sensor+axis combinations is displayed.
 
 ### 5.2 Widget List
 
@@ -616,6 +643,35 @@ Levels: `INFO`, `WARN`, `ERROR`.
 **Implementation:** a lightweight `AppLogger` singleton (or free functions) writing to `QFile` with `QTextStream`. Log file is opened in append mode at startup and closed at shutdown. No log rotation required for now.
 
 ---
+
+---
+
+#### W15 — FFT Spectrum (`FftWidget`)
+
+Located in the **FFT** tab.
+
+**Controls (fixed-height bar at the top):**
+- Sensor toggle: **Accel** / **Gyro** — selects which sensor's spectra are displayed (default: Gyro)
+- Axis toggle: **X** / **Y** / **Z** — selects which measurement axis (default: X)
+- Active selection is highlighted with a blue button style; inactive buttons are dark grey
+
+**Plot area (remainder of widget):**
+- X axis: frequency in Hz, from 0 to Nyquist (`bin_count × freq_resolution_hz`)
+- Y axis: magnitude in dB (20·log10), auto-scaled with 70 dB of dynamic range centred on the peak of the raw spectrum
+- Three superimposed polyline curves:
+  - **Blue** (`#4682FF`): raw signal FFT
+  - **Orange** (`#FFA000`): notch-filtered FFT
+  - **Green** (`#32D232`): notch+pass-filtered FFT
+- Legend in the top-right corner of the plot area
+- Sensor+axis label in the top-left corner of the plot area
+- Grid: dashed horizontal lines every 10 dB, dashed vertical lines at round Hz intervals
+- DC bin (index 0) is excluded from both the plot and the peak search
+- When no valid data has been received: centred placeholder text "No FFT data received"
+
+**Data flow:**
+- `PacketParser` emits `fftReceived(uint8_t sensor, uint8_t axis, FftData data)` (Qt::QueuedConnection)
+- `MainWindow::onFftReceived` updates `TelemetryState` and calls `FftWidget::updateFft`
+- `FftWidget` caches data for all 6 sensor+axis combinations and calls `update()` when the active combination changes
 
 ## 8. Out of Scope
 

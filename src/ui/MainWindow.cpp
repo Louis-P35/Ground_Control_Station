@@ -21,6 +21,7 @@
 #include "widgets/MapWidget.h"
 #include "widgets/VideoWidget.h"
 #include "widgets/CalibrationWidget.h"
+#include "widgets/FftWidget.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Ground Control Station");
@@ -99,6 +100,7 @@ void MainWindow::setupUi() {
     m_map         = new MapWidget(this);
     m_video       = new VideoWidget(this);
     m_calibration = new CalibrationWidget(this);
+    m_fft         = new FftWidget(this);
 
     // --- Tab 0: Dashboard ---
     auto* dashTab = new QWidget(this);
@@ -207,6 +209,9 @@ void MainWindow::setupUi() {
     // --- Tab 5: Calibration — on-ground sensor calibration ---
     m_tabs->addTab(m_calibration, "Calibration");
 
+    // --- Tab 6: FFT — frequency spectrum of gyroscope/accelerometer signals ---
+    m_tabs->addTab(m_fft, "FFT");
+
     setCentralWidget(m_tabs);
 }
 
@@ -255,6 +260,8 @@ void MainWindow::connectSignals() {
             this,   &MainWindow::onBaroReceived,            Qt::QueuedConnection);
     connect(parser, &PacketParser::calibStatusReceived,
             this,   &MainWindow::onCalibStatusReceived,     Qt::QueuedConnection);
+    connect(parser, &PacketParser::fftReceived,
+            this,   &MainWindow::onFftReceived,             Qt::QueuedConnection);
     connect(parser, &PacketParser::logReceived,
             this,   &MainWindow::onLogReceived,             Qt::QueuedConnection);
 
@@ -342,6 +349,11 @@ void MainWindow::onCalibStatusReceived(uint8_t target, uint8_t status,
     csd.message  = message.toStdString();
     m_state.updateCalibStatus(target, csd);
     m_calibration->updateCalibStatus(target, status, progress, message);
+}
+
+void MainWindow::onFftReceived(uint8_t sensor, uint8_t axis, FftData d) {
+    m_state.updateFft(sensor, axis, d);
+    m_fft->updateFft(sensor, axis, d);
 }
 
 void MainWindow::onLogReceived(uint8_t level, QString text) {

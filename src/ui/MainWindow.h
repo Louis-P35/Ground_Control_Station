@@ -22,6 +22,7 @@ class GraphWidget;
 class TerminalWidget;
 class MapWidget;
 class VideoWidget;
+class FftWidget;
 
 // ---------------------------------------------------------------------------
 // MainWindow — single application window.
@@ -45,6 +46,7 @@ private slots:
     void onPidReceived(PidData d);
     void onBaroReceived(BaroData d);
     void onCalibStatusReceived(uint8_t target, uint8_t status, uint8_t progress, QString message);
+    void onFftReceived(uint8_t sensor, uint8_t axis, FftData d);
     void onLogReceived(uint8_t level, QString text);
     void onStatusBarTick();
 
@@ -77,6 +79,7 @@ private:
     MapWidget*          m_map         = nullptr;
     VideoWidget*        m_video       = nullptr;
     CalibrationWidget*  m_calibration = nullptr;
+    FftWidget*          m_fft         = nullptr;
 
     // Status bar labels
     QLabel* m_statusConn    = nullptr;

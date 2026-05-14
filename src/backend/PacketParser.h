@@ -36,6 +36,7 @@ signals:
     void pidReceived     (PidData);
     void baroReceived        (BaroData);
     void calibStatusReceived (uint8_t target, uint8_t status, uint8_t progress, QString message);
+    void fftReceived         (uint8_t sensor, uint8_t axis, FftData data);
     void logReceived         (uint8_t level, QString text);
     void ackReceived     (uint8_t ackType, uint16_t ackSeq, uint8_t success);
 
@@ -52,7 +53,7 @@ private:
         uint32_t expected = 0;
         bool     first    = true;
     };
-    std::array<SeqTracker, 10> m_seqTracker; // index = type (0 unused, 0x01–0x09)
+    std::array<SeqTracker, 11> m_seqTracker; // index = type (0 unused, 0x01–0x0A)
     void trackSeq(uint8_t type, uint16_t seq);
 
     // Throttle sync-error logging: at most one warning per second to avoid

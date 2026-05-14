@@ -12,6 +12,7 @@ Packet rates:
   0x07 Log            — random events
   0x08 Baro           —  10 Hz
   0x09 CalibStatus    —   1 Hz (reacts to PKT_CALIB_CMD from GCS)
+  0x0A FFT            —   2 Hz (6 sensor×axis combinations)
 """
 
 import socket
@@ -151,6 +152,74 @@ def try_receive_cmd(sock, now):
     print(f"  [CMD] CalibCmd target={target} action={action}")
 
 # ── Simulation state ──────────────────────────────────────────────────────────
+# ── FFT simulation constants ─────────────────────────────────────────────────
+# Mirrors Protocol.h: FFT_BIN_COUNT=128, sample_rate=1000 Hz, fft_size=256
+FFT_BIN_COUNT   = 128
+FFT_SAMPLE_RATE = 1000.0            # Hz
+FFT_SIZE        = 256
+FFT_FREQ_RES    = FFT_SAMPLE_RATE / FFT_SIZE   # ≈ 3.906 Hz per bin
+
+# Sensor and axis identifiers — must match Protocol.h
+FFT_SENSOR_ACCEL, FFT_SENSOR_GYRO = 0, 1
+FFT_AXIS_X, FFT_AXIS_Y, FFT_AXIS_Z = 0, 1, 2
+
+
+def _fft_spectrum(t: float, sensor: int, axis: int):
+    """
+    Return (raw, notch, full) lists of FFT_BIN_COUNT magnitude values.
+
+    Simulates motor vibration with a time-varying fundamental frequency plus
+    harmonics. The 'notch' spectrum removes the fundamental; 'full' additionally
+    applies a soft low-pass roll-off above 80 Hz.
+    """
+    # Motor electrical frequency varies slightly around 120 Hz
+    motor_hz = 120.0 + 8.0 * math.sin(t * 0.25)
+
+    # Amplitude varies per sensor and axis (gyro is stronger, X axis is loudest)
+    amp_sensor = 1.0 if sensor == FFT_SENSOR_GYRO else 0.7
+    amp_axis   = [1.0, 0.85, 0.6][axis]
+    amp        = amp_sensor * amp_axis
+
+    raw_bins   = []
+    notch_bins = []
+    full_bins  = []
+
+    for i in range(FFT_BIN_COUNT):
+        hz = i * FFT_FREQ_RES
+
+        # Noise floor — white noise with slight pink tilt
+        noise = random.gauss(0.003, 0.001) + 0.004 / (1.0 + hz / 40.0)
+        noise = max(0.0005, noise)
+
+        # Gaussian peaks at motor harmonics
+        def peak(f0, half_bw=3.5, peak_amp=1.0):
+            return peak_amp * math.exp(-0.5 * ((hz - f0) / half_bw) ** 2)
+
+        # --- Raw spectrum: noise + motor fundamental + harmonics ---
+        raw = (noise
+               + peak(motor_hz,       peak_amp=1.00 * amp)
+               + peak(2 * motor_hz,   peak_amp=0.28 * amp)
+               + peak(3 * motor_hz,   peak_amp=0.12 * amp)
+               + peak(4 * motor_hz,   peak_amp=0.05 * amp))
+
+        # --- Notch spectrum: fundamental attenuated ~30 dB ---
+        notch = (noise
+                 + peak(motor_hz,     peak_amp=0.032 * amp)  # −30 dB
+                 + peak(2 * motor_hz, peak_amp=0.28  * amp)
+                 + peak(3 * motor_hz, peak_amp=0.12  * amp)
+                 + peak(4 * motor_hz, peak_amp=0.05  * amp))
+
+        # --- Full (notch + low-pass at 80 Hz) ---
+        lp_gain = math.exp(-max(0.0, hz - 80.0) / 25.0)
+        full    = notch * lp_gain
+
+        raw_bins.append(raw)
+        notch_bins.append(notch)
+        full_bins.append(full)
+
+    return raw_bins, notch_bins, full_bins
+
+
 seqs = [0] * 0x20   # sequence counters per packet type
 
 LOG_MESSAGES = [
@@ -287,6 +356,21 @@ def simulate(sock, t: float):
             msg_raw = c.message.encode("utf-8")[:63].ljust(64, b"\x00")
             payload = struct.pack("<BBB64s", i, c.status, c.progress, msg_raw)
             sock.send(make_packet(0x09, payload, next_seq(0x09), ts))
+
+    # ── 0x0A FFT (2 Hz — all 6 sensor×axis combinations) ────────────
+    # Each packet: sensor(B) axis(B) bin_count(H) freq_res(f) raw(128f) notch(128f) full(128f)
+    if int(t * 100) % 50 == 0:
+        for sensor in (FFT_SENSOR_ACCEL, FFT_SENSOR_GYRO):
+            for axis in (FFT_AXIS_X, FFT_AXIS_Y, FFT_AXIS_Z):
+                raw, notch, full = _fft_spectrum(t, sensor, axis)
+                payload = struct.pack("<BBHf",
+                                     sensor, axis,
+                                     FFT_BIN_COUNT,
+                                     FFT_FREQ_RES)
+                payload += struct.pack(f"<{FFT_BIN_COUNT}f", *raw)
+                payload += struct.pack(f"<{FFT_BIN_COUNT}f", *notch)
+                payload += struct.pack(f"<{FFT_BIN_COUNT}f", *full)
+                sock.send(make_packet(0x0A, payload, next_seq(0x0A), ts))
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ private slots:
         qRegisterMetaType<StatusData>();
         qRegisterMetaType<PidData>();
         qRegisterMetaType<BaroData>();
+        qRegisterMetaType<FftData>();
     }
 
     // -----------------------------------------------------------------------
@@ -245,6 +246,50 @@ private slots:
         QCOMPARE(spy.at(0).at(0).toUInt(), static_cast<uint>(PKT_SET_PID));
         QCOMPARE(spy.at(0).at(1).toUInt(), 42u);
         QCOMPARE(spy.at(0).at(2).toUInt(), 1u);
+    }
+
+    void fftValid() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::fftReceived);
+
+        PktFft p{};
+        p.sensor             = FFT_SENSOR_GYRO;
+        p.axis               = FFT_AXIS_Y;
+        p.bin_count          = FFT_BIN_COUNT;
+        p.freq_resolution_hz = 3.906f;
+        // Set a known magnitude in the raw and notch arrays
+        p.raw  [10] = 1.5f;
+        p.notch[10] = 0.8f;
+        p.full [10] = 0.3f;
+        parser.parse(TestHelpers::buildPacket(PKT_FFT, p));
+
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.at(0).at(0).toUInt(), static_cast<uint>(FFT_SENSOR_GYRO));
+        QCOMPARE(spy.at(0).at(1).toUInt(), static_cast<uint>(FFT_AXIS_Y));
+
+        FftData d = spy.at(0).at(2).value<FftData>();
+        QVERIFY(d.valid);
+        QCOMPARE(d.bin_count, static_cast<uint16_t>(FFT_BIN_COUNT));
+        QCOMPARE(d.freq_resolution_hz, 3.906f);
+        QCOMPARE(d.raw  [10], 1.5f);
+        QCOMPARE(d.notch[10], 0.8f);
+        QCOMPARE(d.full [10], 0.3f);
+        // Bins not set should remain zero
+        QCOMPARE(d.raw[0], 0.0f);
+    }
+
+    void fftInvalidSensor_noSignal() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::fftReceived);
+
+        PktFft p{};
+        p.sensor    = 99; // Invalid sensor
+        p.axis      = FFT_AXIS_X;
+        p.bin_count = 64;
+        p.freq_resolution_hz = 3.906f;
+        parser.parse(TestHelpers::buildPacket(PKT_FFT, p));
+
+        QCOMPARE(spy.count(), 0);
     }
 
     // -----------------------------------------------------------------------

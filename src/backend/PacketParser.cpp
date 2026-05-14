@@ -71,8 +71,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
         return true;
     }
 
-    // Track sequence numbers for types 0x01–0x09
-    if (hdr->type >= 0x01 && hdr->type <= 0x09)
+    // Track sequence numbers for types 0x01–0x0A
+    if (hdr->type >= 0x01 && hdr->type <= 0x0A)
         trackSeq(hdr->type, hdr->seq);
 
     // Dispatch by type
@@ -177,6 +177,25 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
                                      QString::fromUtf8(p.message));
             break;
         }
+        case PKT_FFT: {
+            if (totalSize < static_cast<int>(sizeof(PktFft))) break;
+            if (hdr->payload_len < static_cast<uint16_t>(sizeof(PktFft)
+                                                         - sizeof(PacketHeader)
+                                                         - sizeof(uint16_t))) break;
+            PktFft p; std::memcpy(&p, pkt, sizeof(p));
+            if (p.sensor > 1 || p.axis > 2 || p.bin_count > FFT_BIN_COUNT) break;
+            FftData d;
+            d.valid              = true;
+            d.sensor             = p.sensor;
+            d.axis               = p.axis;
+            d.bin_count          = p.bin_count;
+            d.freq_resolution_hz = p.freq_resolution_hz;
+            std::memcpy(d.raw,   p.raw,   sizeof(d.raw));
+            std::memcpy(d.notch, p.notch, sizeof(d.notch));
+            std::memcpy(d.full,  p.full,  sizeof(d.full));
+            emit fftReceived(p.sensor, p.axis, d);
+            break;
+        }
         case PKT_ACK: {
             if (totalSize < static_cast<int>(sizeof(PktAck))) break;
             PktAck p; std::memcpy(&p, pkt, sizeof(p));
@@ -197,7 +216,7 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
 // Sequence tracking
 // ---------------------------------------------------------------------------
 void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
-    if (type == 0 || type > 9) return;
+    if (type == 0 || type > 0x0A) return;
     auto& t = m_seqTracker[type];
     if (t.first) {
         t.lastSeq = seq;
@@ -213,7 +232,7 @@ void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
 }
 
 float PacketParser::packetLoss(uint8_t type) const {
-    if (type == 0 || type > 9) return 0.0f;
+    if (type == 0 || type > 0x0A) return 0.0f;
     const auto& t = m_seqTracker[type];
     if (t.expected == 0) return 0.0f;
     float loss = 1.0f - static_cast<float>(t.received) / static_cast<float>(t.expected);

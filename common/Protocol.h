@@ -30,6 +30,7 @@ static constexpr uint8_t PKT_PID      = 0x06;
 static constexpr uint8_t PKT_LOG      = 0x07;
 static constexpr uint8_t PKT_BARO          = 0x08;
 static constexpr uint8_t PKT_CALIB_STATUS  = 0x09; // Drone → GCS: calibration progress
+static constexpr uint8_t PKT_FFT           = 0x0A; // Drone → GCS: FFT spectrum (sensor + axis)
 
 // GCS → Drone
 static constexpr uint8_t PKT_SET_PID       = 0x10;
@@ -154,6 +155,37 @@ struct PktCalibStatus {
     uint8_t status;      // CalibStatusValue
     uint8_t progress;    // 0-100 %
     char    message[64]; // Null-terminated human-readable status message
+    uint16_t crc;
+};
+
+// ---------------------------------------------------------------------------
+// FFT packet constants
+// ---------------------------------------------------------------------------
+
+static constexpr uint16_t FFT_BIN_COUNT = 128; // Max frequency bins per packet
+
+// Sensor identifiers (PktFft::sensor)
+static constexpr uint8_t FFT_SENSOR_ACCEL = 0;
+static constexpr uint8_t FFT_SENSOR_GYRO  = 1;
+
+// Axis identifiers (PktFft::axis)
+static constexpr uint8_t FFT_AXIS_X = 0;
+static constexpr uint8_t FFT_AXIS_Y = 1;
+static constexpr uint8_t FFT_AXIS_Z = 2;
+
+// 0x0A — Drone → GCS: FFT spectrum for one sensor/axis combination.
+// The drone computes three parallel spectra so the GCS can visualise the
+// effect of each filter stage without a round-trip.
+struct PktFft
+{
+    PacketHeader header;
+    uint8_t  sensor;               // FFT_SENSOR_ACCEL or FFT_SENSOR_GYRO
+    uint8_t  axis;                 // FFT_AXIS_X, FFT_AXIS_Y, or FFT_AXIS_Z
+    uint16_t bin_count;            // Valid bins in each array (≤ FFT_BIN_COUNT)
+    float    freq_resolution_hz;   // Hz per bin (= sample_rate / fft_size)
+    float    raw  [FFT_BIN_COUNT]; // Raw signal FFT magnitudes
+    float    notch[FFT_BIN_COUNT]; // Notch-filtered signal FFT magnitudes
+    float    full [FFT_BIN_COUNT]; // Notch+pass-filtered signal FFT magnitudes
     uint16_t crc;
 };
 

@@ -70,6 +70,21 @@ struct CalibStatusData {
     std::string message;               // Human-readable status from drone
 };
 
+// Three parallel spectra for one sensor+axis combination.
+// Indexed by [sensor][axis] where sensor ∈ {FFT_SENSOR_ACCEL, FFT_SENSOR_GYRO}
+// and axis ∈ {FFT_AXIS_X, FFT_AXIS_Y, FFT_AXIS_Z}.
+struct FftData
+{
+    bool     valid              = false;
+    uint8_t  sensor             = 0;
+    uint8_t  axis               = 0;
+    uint16_t bin_count          = 0;
+    float    freq_resolution_hz = 0.0f; // Hz per bin
+    float    raw  [FFT_BIN_COUNT]  = {};
+    float    notch[FFT_BIN_COUNT]  = {};
+    float    full [FFT_BIN_COUNT]  = {};
+};
+
 class TelemetryState {
 public:
     // Called from network thread
@@ -85,6 +100,11 @@ public:
         QMutexLocker l(&m_mutex);
         m_calibStatus[target] = d;
     }
+    void updateFft(uint8_t sensor, uint8_t axis, const FftData& d) {
+        if (sensor > 1 || axis > 2) return;
+        QMutexLocker l(&m_mutex);
+        m_fft[sensor][axis] = d;
+    }
 
     // Called from UI thread — returns a copy
     AttitudeData   attitude()                const { QMutexLocker l(&m_mutex); return m_attitude; }
@@ -99,6 +119,11 @@ public:
         QMutexLocker l(&m_mutex);
         return m_calibStatus[target];
     }
+    FftData fft(uint8_t sensor, uint8_t axis) const {
+        if (sensor > 1 || axis > 2) return {};
+        QMutexLocker l(&m_mutex);
+        return m_fft[sensor][axis];
+    }
 
 private:
     mutable QMutex  m_mutex;
@@ -110,4 +135,5 @@ private:
     PidData         m_pid;
     BaroData        m_baro;
     CalibStatusData m_calibStatus[3]; // indexed by CalibTarget (0=accel, 1=mag, 2=level)
+    FftData         m_fft[2][3];      // indexed by [sensor][axis]
 };

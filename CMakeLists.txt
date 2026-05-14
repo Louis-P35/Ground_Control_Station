@@ -34,6 +34,7 @@ set(SOURCES
     src/ui/widgets/CalibrationWidget.cpp
     src/ui/widgets/GraphWidget.cpp
     src/ui/widgets/TerminalWidget.cpp
+    src/ui/widgets/FftWidget.cpp
 )
 
 set(HEADERS
@@ -58,6 +59,7 @@ set(HEADERS
     src/ui/widgets/CalibrationWidget.h
     src/ui/widgets/GraphWidget.h
     src/ui/widgets/TerminalWidget.h
+    src/ui/widgets/FftWidget.h
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
