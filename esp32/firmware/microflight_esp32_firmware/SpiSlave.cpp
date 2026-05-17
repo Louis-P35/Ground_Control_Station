@@ -35,9 +35,9 @@ void SpiSlave::begin()
     bus.quadhd_io_num   = -1;
     bus.max_transfer_sz = SPI_FRAME_SIZE;
 
-    // mode = 0 → CPOL=0, CPHA=0 — must match the FC SPI master configuration
+    // mode = 3 → CPOL=1, CPHA=1 — must match the FC SPI master (SPI_POLARITY_HIGH + SPI_PHASE_2EDGE)
     spi_slave_interface_config_t slv = {};
-    slv.mode         = 0;
+    slv.mode         = 3;
     slv.spics_io_num = PIN_CS;
     slv.queue_size   = 1; // one pending transaction at a time is sufficient
     slv.flags        = 0;
@@ -53,7 +53,7 @@ void SpiSlave::begin()
     m_initialized = true;
     buildTxFrame();        // fill MISO with "no command pending"
     queueNextTransaction();
-    Serial.println("[SPI] Slave ready — HSPI mode 0, 256-byte frames");
+    Serial.println("[SPI] Slave ready — HSPI mode 3, 256-byte frames");
     Serial.printf("[SPI] MOSI=%d  MISO=%d  SCK=%d  CS=%d\n",
                   PIN_MOSI, PIN_MISO, PIN_SCK, PIN_CS);
 }
