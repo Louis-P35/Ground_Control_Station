@@ -238,10 +238,12 @@ void loop()
         }
         if (g_spi.newStatus())
         {
+            sendStatus(g_spi.status().state);
             g_cntStatus++;
         }
-        if (g_spi.newPid() || g_spi.newCalib() || g_spi.newLog())
+        if (g_spi.newLog())
         {
+            sendLog(g_spi.log().text, g_spi.log().level);
             g_cntOther++;
         }
     }
@@ -262,9 +264,14 @@ void loop()
                       ESP.getFreeHeap(),
                       g_cntAttitude, g_cntStatus, g_cntOther);
 
-        // PKT_STATUS — keeps the GCS "connected" indicator green
-        const char* fcState = g_spi.isInitialized() ? "NO-FC" : "SPI-ERR";
-        sendStatus(fcState);
+        // PKT_STATUS — fallback heartbeat so the GCS stays "connected" when the
+        // FC sends no status of its own.  Skip it when the FC already forwarded
+        // at least one real status frame this second to avoid overwriting it.
+        if (g_cntStatus == 0)
+        {
+            const char* fcState = g_spi.isInitialized() ? "NO-FC" : "SPI-ERR";
+            sendStatus(fcState);
+        }
 
         // PKT_LOG — SPI throughput stats visible in the GCS terminal
         char msg[128];
