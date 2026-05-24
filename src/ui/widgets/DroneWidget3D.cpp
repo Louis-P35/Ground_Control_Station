@@ -14,8 +14,23 @@ DroneWidget3D::DroneWidget3D(QWidget* parent)
 }
 
 void DroneWidget3D::updateAttitude(const AttitudeData& d) {
-    m_qw = d.qw; m_qx = d.qx; m_qy = d.qy; m_qz = d.qz;
-    update(); // Schedule repaint
+    // The drone AHRS uses the ZYX Euler / NED body-frame convention:
+    //   d.qx  ↔  roll  (rotation around the longitudinal / forward axis)
+    //   d.qy  ↔  pitch (rotation around the lateral / right axis)
+    //   d.qz  ↔  yaw   (rotation around the vertical axis)
+    //
+    // The 3D model is rendered in OpenGL axes (X = viewer-right, Y = up,
+    // Z = toward camera = drone front).  We remap so that each physical
+    // motion drives the correct OpenGL axis:
+    //
+    //   pitch up   → OGL X− rotation (OGL X+ would send the nose DOWN)
+    //   yaw right  → OGL Y+ rotation (OGL Y+ sends front toward +X = right) ✓
+    //   roll right → OGL Z− rotation (OGL Z+ would lift the right wing UP)
+    m_qw =  d.qw;
+    m_qx = -d.qy;   // pitch → −OGL X
+    m_qy =  d.qz;   // yaw   → +OGL Y
+    m_qz = -d.qx;   // roll  → −OGL Z
+    update();
 }
 
 void DroneWidget3D::initializeGL() {
