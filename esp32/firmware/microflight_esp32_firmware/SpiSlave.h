@@ -15,12 +15,17 @@
 //   SCK  → GPIO 14
 //   CS   → GPIO 27
 //
+// Data flow:
+//   FC → ESP32 (MOSI): attitude, status, PID, calib, log, processed radio
+//   ESP32 → FC (MISO): GCS commands (PID/calib) + raw S.Bus channel values
+//
 // Usage in loop():
 //   g_spi.update();
-//   if (g_spi.newAttitude()) { /* use g_spi.attitude() */ }
+//   if (g_spi.newAttitude()) { ... }
+//   if (g_spi.newRadio())    { ... }  // processed radio from FC
 //
-// To forward a GCS command to the FC, call setPendingCommand(). The command
-// is clocked out on the next SPI transaction, then automatically cleared.
+// To forward raw S.Bus to the FC, call setSbusRaw() after each decoded frame.
+// To forward a GCS command to the FC, call setPendingCommand().
 // ---------------------------------------------------------------------------
 
 class SpiSlave
@@ -36,6 +41,7 @@ public:
     bool newPid()       const { return m_newPid;      }
     bool newCalib()     const { return m_newCalib;    }
     bool newLog()       const { return m_newLog;      }
+    bool newRadio()     const { return m_newRadio;    }
 
     // ── Latest telemetry snapshots ───────────────────────────────────────────
     const SpiPayloadAttitude&    attitude() const { return m_attitude; }
@@ -43,6 +49,12 @@ public:
     const SpiPayloadPid&         pid()      const { return m_pid;      }
     const SpiPayloadCalibStatus& calib()    const { return m_calib;    }
     const SpiPayloadLog&         log()      const { return m_log;      }
+    const SpiPayloadRadio&       radio()    const { return m_radio;    }
+
+    // ── S.Bus raw data (MISO → FC) ───────────────────────────────────────────
+    // Call after each decoded S.Bus frame. The values are included in every
+    // subsequent SPI MISO frame until overwritten.
+    void setSbusRaw(const uint16_t channels[SBUS_SPI_CHANNELS], bool valid);
 
     // ── Command forwarding (GCS → FC via MISO) ───────────────────────────────
     void setPendingCommand(uint8_t cmdType, const uint8_t* packetBytes, size_t len);
@@ -54,7 +66,7 @@ private:
     void            buildTxFrame();
     static uint16_t crc16(const uint8_t* data, size_t len);
 
-    bool m_initialized = false; // false if spi_slave_initialize failed — slave runs headless
+    bool m_initialized = false;
 
     // DMA-capable buffers — required by the ESP-IDF SPI slave driver
     uint8_t* m_rxBuf = nullptr;
@@ -63,22 +75,28 @@ private:
     spi_slave_transaction_t m_trans       = {};
     bool                    m_transQueued = false;
 
-    // ── Parsed telemetry ─────────────────────────────────────────────────────
+    // ── Parsed telemetry (MOSI → from FC) ───────────────────────────────────
     SpiPayloadAttitude    m_attitude = {};
     SpiPayloadStatus      m_status   = {};
     SpiPayloadPid         m_pid      = {};
     SpiPayloadCalibStatus m_calib    = {};
     SpiPayloadLog         m_log      = {};
+    SpiPayloadRadio       m_radio    = {};
 
     bool m_newAttitude = false;
     bool m_newStatus   = false;
     bool m_newPid      = false;
     bool m_newCalib    = false;
     bool m_newLog      = false;
+    bool m_newRadio    = false;
 
-    // ── Pending command for FC ────────────────────────────────────────────────
+    // ── Raw S.Bus data to include in MISO ────────────────────────────────────
+    bool     m_hasSbus = false;
+    uint16_t m_sbusRaw[SBUS_SPI_CHANNELS] = {};
+
+    // ── Pending GCS command for FC ────────────────────────────────────────────
     bool    m_hasPendingCmd  = false;
     uint8_t m_pendingCmdType = 0;
-    uint8_t m_pendingCmdBuf[sizeof(PktSetPid)] = {}; // sized to largest command
+    uint8_t m_pendingCmdBuf[sizeof(PktSetPid)] = {};
     size_t  m_pendingCmdLen  = 0;
 };

@@ -18,12 +18,20 @@
 //     [SpiFrameHeader 4B] [payload up to 248B] [CRC16 2B] [pad 2B]
 //
 //   ESP32 → FC (MISO):
-//     [magic 2B] [has_cmd 1B] [cmd_type 1B] [cmd payload 27B] [CRC16 2B] [pad 223B]
+//     [magic 2B] [has_cmd 1B] [cmd_type 1B] [cmd 27B] [CRC16 2B]
+//     [has_sbus 1B] [sbus_raw 32B] [pad 190B]
+//
+//     The CRC covers only the command section (bytes 0–30, unchanged from the
+//     original protocol so the FC does not need to update its CRC check).
+//     The raw S.Bus section lives after the CRC in the padding area.
 // ---------------------------------------------------------------------------
 
 static constexpr size_t   SPI_FRAME_SIZE      = 256;
 static constexpr uint16_t SPI_MAGIC_FC_TO_ESP = 0xBEEF;
 static constexpr uint16_t SPI_MAGIC_ESP_TO_FC = 0xCAFE;
+
+// Number of S.Bus channels carried in the MISO frame
+static constexpr int SBUS_SPI_CHANNELS = 16;
 
 // ---------------------------------------------------------------------------
 // FC → ESP32 frame types (carried in SpiFrameHeader::type)
@@ -35,6 +43,7 @@ enum class SpiFrameType : uint8_t
     Pid         = 0x03, //   1 Hz — all 9 PID axes
     CalibStatus = 0x04, // on event — one calibration target
     Log         = 0x05, // on event — one log message
+    Radio       = 0x06, //  50 Hz — processed radio channels from FC (1000–2000 µs)
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +97,14 @@ struct SpiPayloadLog
     char    text[128];  // null-terminated UTF-8 string
 };
 
+// Processed radio channels sent by the FC after mixing / calibration.
+// Values are in standard PWM microseconds (typically 1000–2000).
+struct SpiPayloadRadio
+{
+    uint16_t channels[SBUS_SPI_CHANNELS]; // Processed PWM, 1000–2000 µs
+    uint8_t  rssi;                        // Signal quality 0–255
+};
+
 // ---------------------------------------------------------------------------
 // Full fixed-size frames
 // ---------------------------------------------------------------------------
@@ -100,11 +117,12 @@ struct SpiRxFrame
     SpiFrameHeader header;   //   4 bytes
     union
     {
-        SpiPayloadAttitude    attitude;            //  40 bytes
-        SpiPayloadStatus      status;              //  50 bytes
-        SpiPayloadPid         pid;                 // 108 bytes
-        SpiPayloadCalibStatus calib;               //  67 bytes
-        SpiPayloadLog         log;                 // 129 bytes
+        SpiPayloadAttitude    attitude;              //  40 bytes
+        SpiPayloadStatus      status;               //  50 bytes
+        SpiPayloadPid         pid;                  // 108 bytes
+        SpiPayloadCalibStatus calib;                //  67 bytes
+        SpiPayloadLog         log;                  // 129 bytes
+        SpiPayloadRadio       radio;                //  33 bytes
         uint8_t               raw[SPI_MAX_PAYLOAD]; // 248 bytes — sizes the union
     } payload;               // 248 bytes
     uint16_t crc;            //   2 bytes
@@ -112,9 +130,19 @@ struct SpiRxFrame
 };
 static_assert(sizeof(SpiRxFrame) == SPI_FRAME_SIZE, "SpiRxFrame must be 256 bytes");
 
-// ESP32 → FC (MISO) — carries at most one pending GCS command per transaction
+// ESP32 → FC (MISO)
+//
+// The frame is split into two independent sections:
+//
+//   [0..32]  — Command section (GCS command forwarding, CRC-protected)
+//   [33..65] — S.Bus section   (raw receiver values, appended in padding)
+//   [66..255]— Zero padding
+//
+// The CRC covers only the command section so that the FC does not need to
+// update its CRC check to gain access to the S.Bus data.
 struct SpiTxFrame
 {
+    // ── Command section (existing, CRC-protected) ────────────────────────────
     uint16_t magic;    // SPI_MAGIC_ESP_TO_FC
     uint8_t  has_cmd;  // 1 = a valid GCS command is in cmd; FC ignores cmd if 0
     uint8_t  cmd_type; // PKT_SET_PID (0x10) or PKT_CALIB_CMD (0x20)
@@ -122,9 +150,22 @@ struct SpiTxFrame
     {
         uint8_t set_pid_raw  [sizeof(PktSetPid)];   // 27 bytes
         uint8_t calib_cmd_raw[sizeof(PktCalibCmd)]; // 16 bytes
-    } cmd;             //  27 bytes (sized to the largest command)
-    uint16_t crc;      //   2 bytes — covers magic + has_cmd + cmd_type + cmd
-    uint8_t  pad[SPI_FRAME_SIZE - 2 - 1 - 1 - sizeof(PktSetPid) - 2]; // 223 bytes
+    } cmd;             // 27 bytes (sized to the largest command)
+    uint16_t crc;      //  2 bytes — covers magic + has_cmd + cmd_type + cmd
+
+    // ── S.Bus section (raw receiver values for the FC) ───────────────────────
+    uint8_t  has_sbus;                     // 1 = sbus_raw[] contains a valid frame
+    uint16_t sbus_raw[SBUS_SPI_CHANNELS];  // Raw 11-bit SBUS values (0–2047)
+
+    // ── Padding to reach 256 bytes ───────────────────────────────────────────
+    uint8_t  pad[SPI_FRAME_SIZE
+                 - 2                    // magic
+                 - 1                    // has_cmd
+                 - 1                    // cmd_type
+                 - sizeof(PktSetPid)    // cmd (27 B)
+                 - 2                    // crc
+                 - 1                    // has_sbus
+                 - SBUS_SPI_CHANNELS * 2]; // sbus_raw (32 B)  → 190 bytes
 };
 static_assert(sizeof(SpiTxFrame) == SPI_FRAME_SIZE, "SpiTxFrame must be 256 bytes");
 

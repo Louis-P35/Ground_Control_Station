@@ -93,7 +93,7 @@ bool SpiSlave::update()
     m_transQueued = false;
 
     // Clear all freshness flags before parsing; only the new frame's type will be set
-    m_newAttitude = m_newStatus = m_newPid = m_newCalib = m_newLog = false;
+    m_newAttitude = m_newStatus = m_newPid = m_newCalib = m_newLog = m_newRadio = false;
 
     bool parsed = parseRxFrame(m_rxBuf);
 
@@ -201,6 +201,15 @@ bool SpiSlave::parseRxFrame(const uint8_t* buf)
             m_newLog = true;
             break;
 
+        case SpiFrameType::Radio:
+            if (frame->header.payload_len < sizeof(SpiPayloadRadio))
+            {
+                break;
+            }
+            memcpy(&m_radio, &frame->payload.radio, sizeof(m_radio));
+            m_newRadio = true;
+            break;
+
         default:
             return false;
     }
@@ -208,9 +217,13 @@ bool SpiSlave::parseRxFrame(const uint8_t* buf)
 }
 
 // ---------------------------------------------------------------------------
-// buildTxFrame — fill m_txBuf with the MISO frame (command or idle)
-// The pending command is cleared here: once this frame is clocked out the FC
-// has received it, so we must not send it again on the next transaction.
+// buildTxFrame — fill m_txBuf with the MISO frame.
+//
+// The frame has two independent sections:
+//   1. Command section [0..32]: GCS command forwarding, CRC-protected.
+//      The pending command is cleared here so it is not re-sent.
+//   2. S.Bus section  [33..65]: raw receiver values for the FC.
+//      These are refreshed every call and stay valid until the next frame.
 // ---------------------------------------------------------------------------
 
 void SpiSlave::buildTxFrame()
@@ -218,6 +231,7 @@ void SpiSlave::buildTxFrame()
     memset(m_txBuf, 0, SPI_FRAME_SIZE);
     auto* frame = reinterpret_cast<SpiTxFrame*>(m_txBuf);
 
+    // ── Command section ───────────────────────────────────────────────────────
     frame->magic    = SPI_MAGIC_ESP_TO_FC;
     frame->has_cmd  = m_hasPendingCmd ? 1 : 0;
     frame->cmd_type = m_pendingCmdType;
@@ -231,6 +245,23 @@ void SpiSlave::buildTxFrame()
     // CRC covers magic(2) + has_cmd(1) + cmd_type(1) + full cmd union(27)
     const size_t crcCoverage = 2 + 1 + 1 + sizeof(PktSetPid);
     frame->crc = crc16(m_txBuf, crcCoverage);
+
+    // ── S.Bus section ─────────────────────────────────────────────────────────
+    frame->has_sbus = m_hasSbus ? 1 : 0;
+    if (m_hasSbus)
+    {
+        memcpy(frame->sbus_raw, m_sbusRaw, sizeof(frame->sbus_raw));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// setSbusRaw — store raw S.Bus channel values to include in the next MISO frame
+// ---------------------------------------------------------------------------
+
+void SpiSlave::setSbusRaw(const uint16_t channels[SBUS_SPI_CHANNELS], bool valid)
+{
+    memcpy(m_sbusRaw, channels, SBUS_SPI_CHANNELS * sizeof(uint16_t));
+    m_hasSbus = valid;
 }
 
 // ---------------------------------------------------------------------------

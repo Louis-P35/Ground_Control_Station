@@ -182,27 +182,23 @@ static void sendLog(const char* msg, uint8_t level = 1 /* INFO */)
 }
 
 // ---------------------------------------------------------------------------
-// sendRadio — forward S.Bus channel data as PKT_RADIO to the GCS.
-// Raw 11-bit values (typical range 172–1811) are mapped to 1000–2000 µs,
-// the standard PWM range expected by the GCS. Channels 0–7 are forwarded.
+// sendRadio — forward processed radio data (received from FC via SPI) as
+// PKT_RADIO to the GCS. The FC applies calibration and mixing; the values
+// are already in standard PWM microseconds (1000–2000 µs).
 // ---------------------------------------------------------------------------
 
-static void sendRadio(const SbusReader& sbus)
+static void sendRadio(const SpiPayloadRadio& r)
 {
     PktRadio pkt{};
     fillHeader(pkt.header, PKT_RADIO,
                sizeof(PktRadio) - sizeof(PacketHeader) - sizeof(uint16_t));
 
-    // Map SBUS raw values (172–1811 typical) to 1000–2000 µs, clamped
+    // Forward the first 8 channels to the GCS (PktRadio carries channels[8])
     for (int i = 0; i < 8; ++i)
     {
-        int raw = sbus.channel(i);
-        int us  = 1000 + ((raw - SBUS_RAW_MIN) * 1000) / (SBUS_RAW_MAX - SBUS_RAW_MIN);
-        pkt.channels[i] = (uint16_t)max(1000, min(2000, us));
+        pkt.channels[i] = r.channels[i];
     }
-
-    // RSSI: 0 on failsafe (signal lost), 255 otherwise
-    pkt.rssi = sbus.failsafe() ? 0 : 255;
+    pkt.rssi = r.rssi;
 
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
@@ -289,10 +285,17 @@ void loop()
     }
 
     // ── S.Bus: drain UART RX buffer and decode frames ────────────────────────
+    // Raw values are written into the SPI MISO buffer so the FC can read them.
+    // The FC applies calibration / mixing and sends back processed values.
     g_sbus.update();
     if (g_sbus.newFrame())
     {
-        sendRadio(g_sbus);
+        uint16_t rawCh[SBUS_SPI_CHANNELS];
+        for (int i = 0; i < SBUS_SPI_CHANNELS; ++i)
+        {
+            rawCh[i] = g_sbus.channel(i);
+        }
+        g_spi.setSbusRaw(rawCh, !g_sbus.failsafe());
     }
 
     // ── SPI: drain one completed transaction per call ─────────────────────────
@@ -309,6 +312,12 @@ void loop()
             // percent, motor throttles, FSM state. WiFi RSSI is added here.
             sendFullStatus(g_spi.status());
             g_cntStatus++;
+        }
+        if (g_spi.newRadio())
+        {
+            // Processed radio values (calibrated, 1000–2000 µs) sent by the FC
+            sendRadio(g_spi.radio());
+            g_cntOther++;
         }
         if (g_spi.newLog())
         {
