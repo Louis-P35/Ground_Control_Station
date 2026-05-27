@@ -333,10 +333,12 @@ void loop()
                       ESP.getFreeHeap(),
                       g_cntAttitude, g_cntStatus, g_cntOther);
 
-        // PKT_STATUS — fallback heartbeat so the GCS stays "connected" when the
-        // FC sends no status of its own.  Skip it when the FC already forwarded
-        // at least one real status frame this second to avoid overwriting it.
-        if (g_cntStatus == 0)
+        // PKT_STATUS — fallback heartbeat so the GCS stays "connected" when no FC
+        // is present.  Only fire when NO SPI data at all arrived this second:
+        // if the FC is sending attitude (100 Hz) it is clearly alive even if a
+        // Status frame happened to be missed, so do not overwrite the GCS with
+        // zeros and "NO-FC".
+        if (g_cntStatus == 0 && g_cntAttitude == 0)
         {
             const char* fcState = g_spi.isInitialized() ? "NO-FC" : "SPI-ERR";
             sendStatus(fcState);
