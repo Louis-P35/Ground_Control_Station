@@ -6,6 +6,7 @@
 #include "Secrets.h"      // WIFI_SSID, WIFI_PASSWORD — not versioned
 #include "SpiSlave.h"
 #include "Mtf01Reader.h"
+#include "SbusReader.h"
 
 // ---------------------------------------------------------------------------
 // Network configuration
@@ -27,6 +28,7 @@ static const uint16_t LOCAL_PORT      = 5005;
 
 static SpiSlave    g_spi;
 static Mtf01Reader g_mtf01;
+static SbusReader  g_sbus;
 static WiFiUDP     g_udp;
 static IPAddress   g_broadcastIp;
 
@@ -118,8 +120,35 @@ static void sendMtf01(const Mtf01Reader& mtf)
 }
 
 // ---------------------------------------------------------------------------
+// sendFullStatus — forward a real SpiPayloadStatus as PKT_STATUS to the GCS.
+// All battery, motor, and state fields are copied from the FC SPI frame.
+// The WiFi RSSI is added by the ESP32 itself (the FC doesn't know it).
+// ---------------------------------------------------------------------------
+
+static void sendFullStatus(const SpiPayloadStatus& s)
+{
+    PktStatus pkt{};
+    fillHeader(pkt.header, PKT_STATUS,
+               sizeof(PktStatus) - sizeof(PacketHeader) - sizeof(uint16_t));
+
+    pkt.battery_voltage = s.battery_voltage;
+    pkt.battery_current = s.battery_current;
+    pkt.battery_percent = s.battery_percent;
+    strncpy(pkt.state, s.state, sizeof(pkt.state) - 1);
+    memcpy(pkt.motor_percent, s.motor_percent, sizeof(pkt.motor_percent));
+
+    // Map WiFi RSSI from dBm (e.g. -70) to 0–100
+    int rssiDbm = WiFi.RSSI();
+    pkt.wifi_rssi = (uint8_t)max(0, min(100, (rssiDbm + 100) * 2));
+
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
 // sendStatus — broadcast a PKT_STATUS heartbeat to keep the GCS "connected"
-// When no FC is linked via SPI, state = "NO-FC" and battery fields are zero.
+// when no FC is linked via SPI. State and WiFi RSSI only; battery fields = 0.
 // ---------------------------------------------------------------------------
 
 static void sendStatus(const char* state)
@@ -147,6 +176,34 @@ static void sendLog(const char* msg, uint8_t level = 1 /* INFO */)
                sizeof(PktLog) - sizeof(PacketHeader) - sizeof(uint16_t));
     pkt.level = level;
     strncpy(pkt.text, msg, sizeof(pkt.text) - 1);
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// sendRadio — forward S.Bus channel data as PKT_RADIO to the GCS.
+// Raw 11-bit values (0–2047, typical range 172–1811) are mapped to 0–100 %
+// for easy visualisation. Channels 0–7 (S.Bus ch1–ch8) are forwarded.
+// ---------------------------------------------------------------------------
+
+static void sendRadio(const SbusReader& sbus)
+{
+    PktRadio pkt{};
+    fillHeader(pkt.header, PKT_RADIO,
+               sizeof(PktRadio) - sizeof(PacketHeader) - sizeof(uint16_t));
+
+    // Map SBUS raw values (172–1811 typical) to 0–100 %, clamped
+    for (int i = 0; i < 8; ++i)
+    {
+        int raw = sbus.channel(i);
+        int pct = ((raw - SBUS_RAW_MIN) * 100) / (SBUS_RAW_MAX - SBUS_RAW_MIN);
+        pkt.channels[i] = (uint16_t)max(0, min(100, pct));
+    }
+
+    // RSSI: 0 on failsafe (signal lost), 255 otherwise
+    pkt.rssi = sbus.failsafe() ? 0 : 255;
+
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
     sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
@@ -211,7 +268,10 @@ void setup()
     g_mtf01.begin(Serial1, 115200, 25, 26);
     Serial.println("[MTF01] Reader started — Serial1 RX=25 TX=26 @ 115200");
 
-    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 active");
+    // ── S.Bus receiver (Serial2, GPIO 16 RX / 17 TX, 100000 baud 8E2 inv.) ──
+    g_sbus.begin(Serial2, 16, 17);
+
+    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 + S.Bus active");
     Serial.println("[MAIN] All subsystems ready");
 }
 
@@ -228,6 +288,13 @@ void loop()
         sendMtf01(g_mtf01);
     }
 
+    // ── S.Bus: drain UART RX buffer and decode frames ────────────────────────
+    g_sbus.update();
+    if (g_sbus.newFrame())
+    {
+        sendRadio(g_sbus);
+    }
+
     // ── SPI: drain one completed transaction per call ─────────────────────────
     if (g_spi.update())
     {
@@ -238,7 +305,9 @@ void loop()
         }
         if (g_spi.newStatus())
         {
-            sendStatus(g_spi.status().state);
+            // Forward all fields from the FC: battery voltage, current,
+            // percent, motor throttles, FSM state. WiFi RSSI is added here.
+            sendFullStatus(g_spi.status());
             g_cntStatus++;
         }
         if (g_spi.newLog())
