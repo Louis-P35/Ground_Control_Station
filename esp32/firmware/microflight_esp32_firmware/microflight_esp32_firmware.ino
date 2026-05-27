@@ -183,8 +183,8 @@ static void sendLog(const char* msg, uint8_t level = 1 /* INFO */)
 
 // ---------------------------------------------------------------------------
 // sendRadio — forward S.Bus channel data as PKT_RADIO to the GCS.
-// Raw 11-bit values (0–2047, typical range 172–1811) are mapped to 0–100 %
-// for easy visualisation. Channels 0–7 (S.Bus ch1–ch8) are forwarded.
+// Raw 11-bit values (typical range 172–1811) are mapped to 1000–2000 µs,
+// the standard PWM range expected by the GCS. Channels 0–7 are forwarded.
 // ---------------------------------------------------------------------------
 
 static void sendRadio(const SbusReader& sbus)
@@ -193,12 +193,12 @@ static void sendRadio(const SbusReader& sbus)
     fillHeader(pkt.header, PKT_RADIO,
                sizeof(PktRadio) - sizeof(PacketHeader) - sizeof(uint16_t));
 
-    // Map SBUS raw values (172–1811 typical) to 0–100 %, clamped
+    // Map SBUS raw values (172–1811 typical) to 1000–2000 µs, clamped
     for (int i = 0; i < 8; ++i)
     {
         int raw = sbus.channel(i);
-        int pct = ((raw - SBUS_RAW_MIN) * 100) / (SBUS_RAW_MAX - SBUS_RAW_MIN);
-        pkt.channels[i] = (uint16_t)max(0, min(100, pct));
+        int us  = 1000 + ((raw - SBUS_RAW_MIN) * 1000) / (SBUS_RAW_MAX - SBUS_RAW_MIN);
+        pkt.channels[i] = (uint16_t)max(1000, min(2000, us));
     }
 
     // RSSI: 0 on failsafe (signal lost), 255 otherwise
