@@ -125,11 +125,21 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
         case PKT_STATUS: {
             if (totalSize < static_cast<int>(sizeof(PktStatus))) break;
             PktStatus p; std::memcpy(&p, pkt, sizeof(p));
+            p.state[31] = '\0'; // Ensure null-termination
+
+            // The ESP32 sends a "NO-FC" heartbeat when it thinks the FC is absent.
+            // Suppress it when the GCS is actively receiving other packet types
+            // (attitude, radio, …): any incoming UDP traffic proves the link is
+            // alive, so we must not overwrite the last real status with zeros.
+            bool isHeartbeat = (std::string(p.state) == "NO-FC" ||
+                                std::string(p.state) == "SPI-ERR");
+            if (isHeartbeat && m_hasNonStatusPacket && m_lastNonStatusTimer.elapsed() < 3000)
+                break;
+
             StatusData d;
             d.battery_voltage = p.battery_voltage;
             d.battery_percent = p.battery_percent;
             d.uptime_us       = p.header.timestamp_us;
-            p.state[31] = '\0'; // Ensure null-termination
             d.state = p.state;
             std::memcpy(d.motor_percent, p.motor_percent, 8);
             d.wifi_rssi = p.wifi_rssi;
@@ -206,6 +216,20 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             AppLogger::warn(QString("PacketParser: unknown packet type 0x%1")
                             .arg(hdr->type, 2, 16, QChar('0')));
             break;
+    }
+
+    // Any non-STATUS packet counts as proof that the link is alive
+    if (hdr->type != PKT_STATUS)
+    {
+        if (!m_hasNonStatusPacket)
+        {
+            m_lastNonStatusTimer.start();
+            m_hasNonStatusPacket = true;
+        }
+        else
+        {
+            m_lastNonStatusTimer.restart();
+        }
     }
 
     offset += totalSize;
