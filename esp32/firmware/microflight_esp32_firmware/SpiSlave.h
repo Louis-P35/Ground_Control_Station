@@ -56,6 +56,11 @@ public:
     // subsequent SPI MISO frame until overwritten.
     void setSbusRaw(const uint16_t channels[SBUS_SPI_CHANNELS], bool valid);
 
+    // ── Diagnostic log (drained by main loop into sendLog()) ─────────────────
+    bool        hasPendingLog()  const { return m_hasPendingLog; }
+    const char* pendingLogText() const { return m_pendingLog;    }
+    void        clearPendingLog()      { m_hasPendingLog = false; }
+
     // ── Command forwarding (GCS → FC via MISO) ───────────────────────────────
     void setPendingCommand(uint8_t cmdType, const uint8_t* packetBytes, size_t len);
     bool hasPendingCommand() const { return m_hasPendingCmd; }
@@ -93,6 +98,11 @@ private:
     // ── Raw S.Bus data to include in MISO ────────────────────────────────────
     bool     m_hasSbus = false;
     uint16_t m_sbusRaw[SBUS_SPI_CHANNELS] = {};
+
+    // ── Diagnostic log — queued by parseRxFrame(), drained by the main loop ─
+    bool m_hasPendingLog            = false;
+    bool m_statusSizeMismatchLogged = false;
+    char m_pendingLog[128]          = {};
 
     // ── Pending GCS command for FC ────────────────────────────────────────────
     bool    m_hasPendingCmd  = false;

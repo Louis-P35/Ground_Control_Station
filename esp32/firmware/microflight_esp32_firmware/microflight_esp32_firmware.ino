@@ -7,6 +7,7 @@
 #include "SpiSlave.h"
 #include "Mtf01Reader.h"
 #include "SbusReader.h"
+#include "GpsReader.h"
 
 // ---------------------------------------------------------------------------
 // Network configuration
@@ -29,6 +30,7 @@ static const uint16_t LOCAL_PORT      = 5005;
 static SpiSlave    g_spi;
 static Mtf01Reader g_mtf01;
 static SbusReader  g_sbus;
+static GpsReader   g_gps;
 static WiFiUDP     g_udp;
 static IPAddress   g_broadcastIp;
 
@@ -187,6 +189,33 @@ static void sendLog(const char* msg, uint8_t level = 1 /* INFO */)
 // are already in standard PWM microseconds (1000–2000 µs).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// sendGps — forward GPS fix as PKT_GPS to the GCS
+// ---------------------------------------------------------------------------
+
+static void sendGps(const GpsReader& gps)
+{
+    PktGps pkt{};
+    fillHeader(pkt.header, PKT_GPS,
+               sizeof(PktGps) - sizeof(PacketHeader) - sizeof(uint16_t));
+    pkt.latitude    = gps.latitude();
+    pkt.longitude   = gps.longitude();
+    pkt.altitude_m  = gps.altitude();
+    pkt.speed_ms    = gps.speed();
+    pkt.heading_deg = gps.heading();
+    pkt.satellites  = gps.satellites();
+    pkt.fix_type    = gps.fixType();
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// sendRadio — forward processed radio data (received from FC via SPI) as
+// PKT_RADIO to the GCS. The FC applies calibration and mixing; the values
+// are already in standard PWM microseconds (1000–2000 µs).
+// ---------------------------------------------------------------------------
+
 static void sendRadio(const SpiPayloadRadio& r)
 {
     PktRadio pkt{};
@@ -211,14 +240,11 @@ static void sendRadio(const SpiPayloadRadio& r)
 
 void setup()
 {
-    Serial.begin(115200);
-    delay(200);
-    Serial.println("\n========================================");
-    Serial.println("  MicroFlight ESP32 — booting");
-    Serial.println("========================================");
+    // ── GPS (UART0 remapped, GPIO 4 RX / 2 TX, 9600 baud) ───────────────────
+    // Serial is remapped away from USB — debug output goes to GCS via WiFi/UDP.
+    g_gps.begin(Serial, 4, 2, 9600);
 
     // ── WiFi ─────────────────────────────────────────────────────────────────
-    Serial.printf("[WiFi] Connecting to \"%s\"", STA_SSID);
     WiFi.mode(WIFI_STA);
     WiFi.begin(STA_SSID, STA_PASSWORD);
 
@@ -226,9 +252,7 @@ void setup()
     while (WiFi.status() != WL_CONNECTED && millis() < deadline)
     {
         delay(250);
-        Serial.print('.');
     }
-    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -240,35 +264,44 @@ void setup()
             (ip[2] & mask[2]) | (~mask[2] & 0xFF),
             0xFF
         );
-        Serial.printf("[WiFi] STA  IP: %s  RSSI: %d dBm\n",
-                      ip.toString().c_str(), WiFi.RSSI());
     }
     else
     {
-        Serial.println("[WiFi] STA timeout — starting AP");
         WiFi.mode(WIFI_AP);
         WiFi.softAP(AP_SSID, AP_PASSWORD);
         g_broadcastIp = IPAddress(192, 168, 4, 255);
-        Serial.printf("[WiFi] AP  SSID: \"%s\"  IP: %s\n",
-                      AP_SSID, WiFi.softAPIP().toString().c_str());
     }
 
     g_udp.begin(LOCAL_PORT);
-    Serial.printf("[UDP] Socket open — broadcasting to %s:%u\n",
-                  g_broadcastIp.toString().c_str(), GCS_PORT);
+
+    // Log WiFi result — UDP is now up so sendLog works from here on
+    {
+        char msg[128];
+        if (WiFi.status() == WL_CONNECTED)
+            snprintf(msg, sizeof(msg), "[WiFi] STA connected — IP: %s  RSSI: %d dBm",
+                     WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        else
+            snprintf(msg, sizeof(msg), "[WiFi] STA timeout — AP started  SSID: %s  IP: %s",
+                     AP_SSID, WiFi.softAPIP().toString().c_str());
+        sendLog(msg);
+    }
+    sendLog("[GPS] UART0 RX=4 TX=2 @ 9600 baud — BN-880 active");
 
     // ── SPI slave ─────────────────────────────────────────────────────────────
     g_spi.begin();
+    if (!g_spi.isInitialized())
+        sendLog("[SPI] ERROR: slave init failed — SPI disabled", 3 /* ERROR */);
+    else
+        sendLog("[SPI] Slave ready — HSPI mode 3, 256-byte frames");
 
     // ── MTF-01 (Serial1, GPIO 25 RX / 26 TX, 115200 baud) ───────────────────
     g_mtf01.begin(Serial1, 115200, 25, 26);
-    Serial.println("[MTF01] Reader started — Serial1 RX=25 TX=26 @ 115200");
+    sendLog("[MTF01] Reader started — Serial1 RX=25 TX=26 @ 115200");
 
     // ── S.Bus receiver (Serial2, GPIO 16 RX / 17 TX, 100000 baud 8E2 inv.) ──
     g_sbus.begin(Serial2, 16, 17);
 
-    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 + S.Bus active");
-    Serial.println("[MAIN] All subsystems ready");
+    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 + S.Bus + GPS active");
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +310,9 @@ void setup()
 
 void loop()
 {
+    // ── GPS: drain UART RX buffer and parse NMEA frames ─────────────────────
+    g_gps.update();
+
     // ── MTF-01: drain UART RX buffer and parse MAVLink frames ────────────────
     g_mtf01.update();
     if (g_mtf01.newData())
@@ -299,31 +335,34 @@ void loop()
     }
 
     // ── SPI: drain one completed transaction per call ─────────────────────────
-    if (g_spi.update())
+    g_spi.update();
+
+    // Forward any internal diagnostic log regardless of update() result
+    if (g_spi.hasPendingLog())
     {
-        if (g_spi.newAttitude())
-        {
-            sendAttitude(g_spi.attitude());
-            g_cntAttitude++;
-        }
-        if (g_spi.newStatus())
-        {
-            // Forward all fields from the FC: battery voltage, current,
-            // percent, motor throttles, FSM state. WiFi RSSI is added here.
-            sendFullStatus(g_spi.status());
-            g_cntStatus++;
-        }
-        if (g_spi.newRadio())
-        {
-            // Processed radio values (calibrated, 1000–2000 µs) sent by the FC
-            sendRadio(g_spi.radio());
-            g_cntOther++;
-        }
-        if (g_spi.newLog())
-        {
-            sendLog(g_spi.log().text, g_spi.log().level);
-            g_cntOther++;
-        }
+        sendLog(g_spi.pendingLogText(), 2 /* WARN */);
+        g_spi.clearPendingLog();
+    }
+
+    if (g_spi.newAttitude())
+    {
+        sendAttitude(g_spi.attitude());
+        g_cntAttitude++;
+    }
+    if (g_spi.newStatus())
+    {
+        sendFullStatus(g_spi.status());
+        g_cntStatus++;
+    }
+    if (g_spi.newRadio())
+    {
+        sendRadio(g_spi.radio());
+        g_cntOther++;
+    }
+    if (g_spi.newLog())
+    {
+        sendLog(g_spi.log().text, g_spi.log().level);
+        g_cntOther++;
     }
 
     // ── 1 Hz status report — serial + GCS log ────────────────────────────────
@@ -332,15 +371,23 @@ void loop()
     {
         g_lastStatusMs = now;
 
-        // Serial report
-        Serial.printf("[STATUS] WiFi: %s  RSSI: %d dBm  heap: %u B"
-                      "  SPI att=%lu  sta=%lu  other=%lu\n",
-                      WiFi.status() == WL_CONNECTED
-                          ? WiFi.localIP().toString().c_str()
-                          : "disconnected",
-                      WiFi.RSSI(),
-                      ESP.getFreeHeap(),
-                      g_cntAttitude, g_cntStatus, g_cntOther);
+        // GPS — send at 1 Hz regardless of fix so the GCS always sees live data
+        sendGps(g_gps);
+
+        // 1 Hz stats log visible in the GCS terminal
+        {
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                     "[STATUS] WiFi: %s  RSSI: %d dBm  heap: %u B"
+                     "  SPI att=%lu  sta=%lu  other=%lu",
+                     WiFi.status() == WL_CONNECTED
+                         ? WiFi.localIP().toString().c_str()
+                         : "disconnected",
+                     WiFi.RSSI(),
+                     ESP.getFreeHeap(),
+                     g_cntAttitude, g_cntStatus, g_cntOther);
+            sendLog(msg);
+        }
 
         // PKT_STATUS — fallback heartbeat so the GCS stays "connected" when no FC
         // is present.  Only fire when NO SPI data at all arrived this second:

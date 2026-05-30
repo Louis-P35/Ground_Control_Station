@@ -22,7 +22,9 @@ void SpiSlave::begin()
     m_txBuf = static_cast<uint8_t*>(heap_caps_malloc(SPI_FRAME_SIZE, MALLOC_CAP_DMA));
     if (!m_rxBuf || !m_txBuf)
     {
-        Serial.println("[SPI] ERROR: DMA buffer allocation failed — SPI disabled");
+        snprintf(m_pendingLog, sizeof(m_pendingLog),
+                 "[SPI] ERROR: DMA buffer allocation failed — SPI disabled");
+        m_hasPendingLog = true;
         return;
     }
     memset(m_rxBuf, 0, SPI_FRAME_SIZE);
@@ -46,16 +48,15 @@ void SpiSlave::begin()
     esp_err_t err = spi_slave_initialize(SPI2_HOST, &bus, &slv, SPI_DMA_CH_AUTO);
     if (err != ESP_OK)
     {
-        Serial.printf("[SPI] ERROR: init failed (%s) — SPI disabled\n", esp_err_to_name(err));
+        snprintf(m_pendingLog, sizeof(m_pendingLog),
+                 "[SPI] ERROR: init failed (%s) — SPI disabled", esp_err_to_name(err));
+        m_hasPendingLog = true;
         return; // non-fatal: loop() continues and heartbeats are still sent
     }
 
     m_initialized = true;
     buildTxFrame();        // fill MISO with "no command pending"
     queueNextTransaction();
-    Serial.println("[SPI] Slave ready — HSPI mode 3, 256-byte frames");
-    Serial.printf("[SPI] MOSI=%d  MISO=%d  SCK=%d  CS=%d\n",
-                  PIN_MOSI, PIN_MISO, PIN_SCK, PIN_CS);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +86,9 @@ bool SpiSlave::update()
     }
     if (err != ESP_OK)
     {
-        Serial.printf("[SPI] get_trans_result error: %s\n", esp_err_to_name(err));
+        snprintf(m_pendingLog, sizeof(m_pendingLog),
+                 "[SPI] get_trans_result error: %s", esp_err_to_name(err));
+        m_hasPendingLog = true;
         m_transQueued = false;
         return false;
     }
@@ -119,7 +122,9 @@ void SpiSlave::queueNextTransaction()
     m_transQueued = (err == ESP_OK);
     if (!m_transQueued)
     {
-        Serial.printf("[SPI] queue_trans failed: %s\n", esp_err_to_name(err));
+        snprintf(m_pendingLog, sizeof(m_pendingLog),
+                 "[SPI] queue_trans failed: %s", esp_err_to_name(err));
+        m_hasPendingLog = true;
     }
 }
 
@@ -165,6 +170,16 @@ bool SpiSlave::parseRxFrame(const uint8_t* buf)
         case SpiFrameType::Status:
             if (frame->header.payload_len < sizeof(SpiPayloadStatus))
             {
+                // Log once so the GCS can show the mismatch without spamming
+                if (!m_statusSizeMismatchLogged)
+                {
+                    snprintf(m_pendingLog, sizeof(m_pendingLog),
+                             "[SPI] Status rejected: len=%u expected>=%u",
+                             (unsigned)frame->header.payload_len,
+                             (unsigned)sizeof(SpiPayloadStatus));
+                    m_hasPendingLog           = true;
+                    m_statusSizeMismatchLogged = true;
+                }
                 break;
             }
             memcpy(&m_status, &frame->payload.status, sizeof(m_status));
@@ -272,8 +287,10 @@ void SpiSlave::setPendingCommand(uint8_t cmdType, const uint8_t* packetBytes, si
 {
     if (len > sizeof(m_pendingCmdBuf))
     {
-        Serial.printf("[SPI] setPendingCommand: payload too large (%u > %u)\n",
-                      len, sizeof(m_pendingCmdBuf));
+        snprintf(m_pendingLog, sizeof(m_pendingLog),
+                 "[SPI] setPendingCommand: payload too large (%u > %u)",
+                 (unsigned)len, (unsigned)sizeof(m_pendingCmdBuf));
+        m_hasPendingLog = true;
         return;
     }
     m_pendingCmdType = cmdType;

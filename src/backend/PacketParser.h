@@ -61,10 +61,4 @@ private:
     QElapsedTimer m_syncWarnTimer;
     bool          m_syncWarnTimerStarted = false;
 
-    // Tracks when any non-STATUS packet was last received.
-    // Used to suppress the ESP32 "NO-FC" heartbeat while other data is flowing:
-    // if the GCS is receiving attitude, radio, MTF-01, etc., the link is alive
-    // regardless of what the STATUS state string says.
-    QElapsedTimer m_lastNonStatusTimer;
-    bool          m_hasNonStatusPacket = false;
 };
