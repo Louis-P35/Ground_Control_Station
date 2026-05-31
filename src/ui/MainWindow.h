@@ -9,6 +9,7 @@
 #include "backend/CommandSender.h"
 
 class DroneWidget3D;
+class TrackingWidget3D;
 class CompassWidget;
 class JoystickWidget;
 class Mtf01Widget;
@@ -43,6 +44,7 @@ private slots:
     void onMtf01Received(Mtf01Data d);
     void onRadioReceived(RadioData d);
     void onStatusReceived(StatusData d);
+    void onPositionReceived(PositionData d);
     void onPidReceived(PidData d);
     void onBaroReceived(BaroData d);
     void onCalibStatusReceived(uint8_t target, uint8_t status, uint8_t progress, QString message);
@@ -65,8 +67,9 @@ private:
     QTabWidget*      m_tabs     = nullptr;
 
     // Widgets
-    DroneWidget3D*   m_drone3d  = nullptr;
-    CompassWidget*   m_compass  = nullptr;
+    DroneWidget3D*    m_drone3d  = nullptr;
+    TrackingWidget3D* m_tracking = nullptr;
+    CompassWidget*    m_compass  = nullptr;
     JoystickWidget*  m_joystick = nullptr;
     Mtf01Widget*     m_mtf01    = nullptr;
     GpsWidget*       m_gps      = nullptr;

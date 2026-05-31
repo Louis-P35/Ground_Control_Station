@@ -21,6 +21,7 @@ set(SOURCES
 
     src/ui/MainWindow.cpp
     src/ui/widgets/DroneWidget3D.cpp
+    src/ui/widgets/TrackingWidget3D.cpp
     src/ui/widgets/CompassWidget.cpp
     src/ui/widgets/JoystickWidget.cpp
     src/ui/widgets/Mtf01Widget.cpp
@@ -46,6 +47,7 @@ set(HEADERS
 
     src/ui/MainWindow.h
     src/ui/widgets/DroneWidget3D.h
+    src/ui/widgets/TrackingWidget3D.h
     src/ui/widgets/CompassWidget.h
     src/ui/widgets/JoystickWidget.h
     src/ui/widgets/Mtf01Widget.h

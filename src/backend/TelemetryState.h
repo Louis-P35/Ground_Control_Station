@@ -46,6 +46,20 @@ struct StatusData {
     uint32_t    uptime_us        = 0; // Drone uptime from packet header timestamp
 };
 
+// Fused position estimate in the local NED frame (origin = home/arming point).
+// `valid` stays false until the first PKT_POSITION is received, which lets the
+// 3D tracking view know whether to draw the drone at its real location or to
+// keep it floating at the scene centre.
+struct PositionData {
+    float north_m   = 0;
+    float east_m    = 0;
+    float down_m    = 0; // Positive = below origin
+    float vel_north = 0;
+    float vel_east  = 0;
+    float vel_down  = 0;
+    bool  valid     = false;
+};
+
 struct PidData {
     PidAxis rate_roll     = {};
     PidAxis rate_pitch    = {};
@@ -93,6 +107,7 @@ public:
     void updateMtf01   (const Mtf01Data&    d) { QMutexLocker l(&m_mutex); m_mtf01    = d; }
     void updateRadio   (const RadioData&    d) { QMutexLocker l(&m_mutex); m_radio    = d; }
     void updateStatus  (const StatusData&   d) { QMutexLocker l(&m_mutex); m_status   = d; }
+    void updatePosition(const PositionData& d) { QMutexLocker l(&m_mutex); m_position = d; }
     void updatePid     (const PidData&      d) { QMutexLocker l(&m_mutex); m_pid      = d; }
     void updateBaro       (const BaroData&       d) { QMutexLocker l(&m_mutex); m_baro = d; }
     void updateCalibStatus(uint8_t target, const CalibStatusData& d) {
@@ -112,6 +127,7 @@ public:
     Mtf01Data      mtf01()                   const { QMutexLocker l(&m_mutex); return m_mtf01;    }
     RadioData      radio()                   const { QMutexLocker l(&m_mutex); return m_radio;    }
     StatusData     status()                  const { QMutexLocker l(&m_mutex); return m_status;   }
+    PositionData   position()                const { QMutexLocker l(&m_mutex); return m_position; }
     PidData        pid()                     const { QMutexLocker l(&m_mutex); return m_pid;      }
     BaroData       baro()                    const { QMutexLocker l(&m_mutex); return m_baro;     }
     CalibStatusData calibStatus(uint8_t target) const {
@@ -132,6 +148,7 @@ private:
     Mtf01Data       m_mtf01;
     RadioData       m_radio;
     StatusData      m_status;
+    PositionData    m_position;
     PidData         m_pid;
     BaroData        m_baro;
     CalibStatusData m_calibStatus[3]; // indexed by CalibTarget (0=accel, 1=mag, 2=level)

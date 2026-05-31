@@ -106,6 +106,7 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x08` | Barometer (pressure, temperature, altitude) | 10 Hz |
 | `0x09` | Calibration status (per target) | On event |
 | `0x0A` | FFT spectrum (one sensor+axis per packet) | 2 Hz |
+| `0x0B` | Position (fused NED position + velocity) | 20 Hz |
 
 #### 0x01 — Attitude
 ```cpp
@@ -339,17 +340,19 @@ Joystick sits above compass in col 2 (each occupies 1 row).
 Row 2 right half (cols 2-3) is a horizontal info bar grouping barometer, GPS, status, and MTF-01 side by side.
 Row stretch ratios: rows 0 and 1 weight 2, row 2 weight 3 (terminal gets more vertical space).
 
-**Tab 1 — Graph**: the real-time graph widget occupies the full tab area.
+**Tab 1 — 3D Tracking**: third-person follow view (`TrackingWidget3D`) rendering the drone in a local NED scene — a 20×20 m ground grid, the quaternion-oriented drone model, and a fading blue movement trail of the last 300 positions. The camera follows from behind and above, automatically backs off when the drone nears the view edge, and supports manual wheel-zoom and right-drag orbit that override the follow for 3 s before easing back. Driven by `PktAttitude` (orientation) and `PktPosition` (NED position); the drone floats at the scene centre until the first position fix arrives.
 
-**Tab 2 — Map**: the satellite map widget (`MapWidget`) occupies the full tab area.
+**Tab 2 — Graph**: the real-time graph widget occupies the full tab area.
 
-**Tab 3 — Video**: the video widget (`VideoWidget`) occupies the full tab area.
+**Tab 3 — Map**: the satellite map widget (`MapWidget`) occupies the full tab area.
 
-**Tab 4 — Settings**: PID configuration widget (`PidConfigWidget`) allowing tuning of all 9 PID axes (Rate, Attitude, Position). Values are sent to the drone on demand and updated automatically when `PktPidValues` is received.
+**Tab 4 — Video**: the video widget (`VideoWidget`) occupies the full tab area.
 
-**Tab 5 — Calibration**: sensor calibration widget (`CalibrationWidget`) with three panels — Accelerometer, Magnetometer, Level/Attitude 0.
+**Tab 5 — Settings**: PID configuration widget (`PidConfigWidget`) allowing tuning of all 9 PID axes (Rate, Attitude, Position). Values are sent to the drone on demand and updated automatically when `PktPidValues` is received.
 
-**Tab 6 — FFT**: frequency spectrum viewer (`FftWidget`) showing the three filter-stage spectra (raw, notch, notch+pass) superimposed with different colours. A sensor toggle (Accel/Gyro) and an axis toggle (X/Y/Z) control which of the six sensor+axis combinations is displayed.
+**Tab 6 — Calibration**: sensor calibration widget (`CalibrationWidget`) with three panels — Accelerometer, Magnetometer, Level/Attitude 0.
+
+**Tab 7 — FFT**: frequency spectrum viewer (`FftWidget`) showing the three filter-stage spectra (raw, notch, notch+pass) superimposed with different colours. A sensor toggle (Accel/Gyro) and an axis toggle (X/Y/Z) control which of the six sensor+axis combinations is displayed.
 
 ### 5.2 Widget List
 

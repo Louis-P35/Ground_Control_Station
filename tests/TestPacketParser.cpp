@@ -24,6 +24,7 @@ private slots:
         qRegisterMetaType<Mtf01Data>();
         qRegisterMetaType<RadioData>();
         qRegisterMetaType<StatusData>();
+        qRegisterMetaType<PositionData>();
         qRegisterMetaType<PidData>();
         qRegisterMetaType<BaroData>();
         qRegisterMetaType<FftData>();
@@ -138,6 +139,30 @@ private slots:
         QCOMPARE(d.wifi_rssi,       static_cast<uint8_t>(90));
         for (int i = 0; i < 8; ++i)
             QCOMPARE(d.motor_percent[i], static_cast<uint8_t>(50 + i));
+    }
+
+    void positionValid() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::positionReceived);
+
+        PktPosition p{};
+        p.north_m   = 12.5f;
+        p.east_m    = -3.25f;
+        p.down_m    = -8.0f; // 8 m above home
+        p.vel_north = 1.5f;
+        p.vel_east  = -0.5f;
+        p.vel_down  = 0.25f;
+        parser.parse(TestHelpers::buildPacket(PKT_POSITION, p));
+
+        QCOMPARE(spy.count(), 1);
+        auto d = spy.at(0).at(0).value<PositionData>();
+        QCOMPARE(d.north_m,   12.5f);
+        QCOMPARE(d.east_m,    -3.25f);
+        QCOMPARE(d.down_m,    -8.0f);
+        QCOMPARE(d.vel_north, 1.5f);
+        QCOMPARE(d.vel_east,  -0.5f);
+        QCOMPARE(d.vel_down,  0.25f);
+        QVERIFY(d.valid); // Parser flags a real fix
     }
 
     void pidValid() {

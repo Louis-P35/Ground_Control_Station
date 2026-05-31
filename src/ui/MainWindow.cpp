@@ -7,6 +7,7 @@
 #include <QStatusBar>
 #include <QApplication>
 #include "widgets/DroneWidget3D.h"
+#include "widgets/TrackingWidget3D.h"
 #include "widgets/CompassWidget.h"
 #include "widgets/JoystickWidget.h"
 #include "widgets/Mtf01Widget.h"
@@ -79,14 +80,16 @@ MainWindow::~MainWindow() {
 //    Row 1: [3D                          ] [compass       ] [motors       ]
 //    Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 //
-//  Tab 1 "Graph":       Full-window graph widget
-//  Tab 2 "Map":         Full-window map widget
-//  Tab 3 "Video":       Full-window video feed
-//  Tab 4 "Settings":    PID configuration
-//  Tab 5 "Calibration": Sensor calibration (accel, mag, level)
+//  Tab 1 "3D Tracking": Third-person follow view (drone + trail in NED scene)
+//  Tab 2 "Graph":       Full-window graph widget
+//  Tab 3 "Map":         Full-window map widget
+//  Tab 4 "Video":       Full-window video feed
+//  Tab 5 "Settings":    PID configuration
+//  Tab 6 "Calibration": Sensor calibration (accel, mag, level)
 // ---------------------------------------------------------------------------
 void MainWindow::setupUi() {
     m_drone3d  = new DroneWidget3D(this);
+    m_tracking = new TrackingWidget3D(this);
     m_compass  = new CompassWidget(this);
     m_joystick = new JoystickWidget(this);
     m_mtf01    = new Mtf01Widget(this);
@@ -195,6 +198,10 @@ void MainWindow::setupUi() {
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(false);
     m_tabs->addTab(dashTab,      "Dashboard");
+
+    // --- Tab 1: 3D Tracking — third-person follow view of the drone ---
+    m_tabs->addTab(m_tracking,   "3D Tracking");
+
     m_tabs->addTab(graphTab,     "Graph");
 
     // --- Tab 2: Map — MapWidget manages its own overlay buttons internally ---
@@ -254,6 +261,8 @@ void MainWindow::connectSignals() {
             this,   &MainWindow::onRadioReceived,           Qt::QueuedConnection);
     connect(parser, &PacketParser::statusReceived,
             this,   &MainWindow::onStatusReceived,          Qt::QueuedConnection);
+    connect(parser, &PacketParser::positionReceived,
+            this,   &MainWindow::onPositionReceived,        Qt::QueuedConnection);
     connect(parser, &PacketParser::pidReceived,
             this,   &MainWindow::onPidReceived,             Qt::QueuedConnection);
     connect(parser, &PacketParser::baroReceived,
@@ -302,6 +311,7 @@ void MainWindow::onDroneEndpointUpdated(QString ip, quint16 /*port*/) {
 void MainWindow::onAttitudeReceived(AttitudeData d) {
     m_state.updateAttitude(d);
     m_drone3d->updateAttitude(d);
+    m_tracking->updateAttitude(d);
     m_graph->pushAttitude(d);
 }
 
@@ -329,6 +339,11 @@ void MainWindow::onStatusReceived(StatusData d) {
     m_motor->updateData(d);
     m_status->updateData(d);
     m_statusRssi->setText(QString("  RSSI: %1  ").arg(d.wifi_rssi));
+}
+
+void MainWindow::onPositionReceived(PositionData d) {
+    m_state.updatePosition(d);
+    m_tracking->updatePosition(d);
 }
 
 void MainWindow::onPidReceived(PidData d) {

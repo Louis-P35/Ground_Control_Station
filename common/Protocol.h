@@ -31,6 +31,7 @@ static constexpr uint8_t PKT_LOG      = 0x07;
 static constexpr uint8_t PKT_BARO          = 0x08;
 static constexpr uint8_t PKT_CALIB_STATUS  = 0x09; // Drone → GCS: calibration progress
 static constexpr uint8_t PKT_FFT           = 0x0A; // Drone → GCS: FFT spectrum (sensor + axis)
+static constexpr uint8_t PKT_POSITION      = 0x0B; // Drone → GCS: NED position + velocity estimate
 
 // GCS → Drone
 static constexpr uint8_t PKT_SET_PID       = 0x10;
@@ -119,6 +120,20 @@ struct PktBaro {
     float pressure_pa;   // Atmospheric pressure in Pascals
     float temperature_c; // Temperature in Celsius
     float altitude_m;    // Barometric altitude in meters (derived from pressure)
+    uint16_t crc;
+};
+
+// 0x0B — Drone → GCS: fused position estimate in the local NED frame.
+// The origin is the home/arming point. North/East are horizontal axes,
+// Down is positive toward the ground (so a climbing drone has down_m < 0).
+struct PktPosition {
+    PacketHeader header;
+    float north_m;   // Position north of home, meters
+    float east_m;    // Position east  of home, meters
+    float down_m;    // Position below home, meters (positive = below origin)
+    float vel_north; // Velocity north, m/s
+    float vel_east;  // Velocity east,  m/s
+    float vel_down;  // Velocity down,  m/s
     uint16_t crc;
 };
 

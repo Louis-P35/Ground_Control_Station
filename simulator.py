@@ -13,6 +13,7 @@ Packet rates:
   0x08 Baro           —  10 Hz
   0x09 CalibStatus    —   1 Hz (reacts to PKT_CALIB_CMD from GCS)
   0x0A FFT            —   2 Hz (6 sensor×axis combinations)
+  0x0B Position (NED) —  20 Hz
 """
 
 import socket
@@ -371,6 +372,22 @@ def simulate(sock, t: float):
                 payload += struct.pack(f"<{FFT_BIN_COUNT}f", *notch)
                 payload += struct.pack(f"<{FFT_BIN_COUNT}f", *full)
                 sock.send(make_packet(0x0A, payload, next_seq(0x0A), ts))
+
+    # ── 0x0B Position (NED, 20 Hz) ───────────────────────────────────
+    # A gentle circular flight path within the 20×20 m scene, with a slow
+    # vertical bob. NED: north/east are horizontal, down is positive toward
+    # the ground (so a drone above home has down < 0).
+    if int(t * 100) % 5 == 0:
+        radius = 6.0
+        omega  = 0.25
+        north  = radius * math.sin(t * omega)
+        east   = radius * math.cos(t * omega)
+        down   = -2.5 - 0.5 * math.sin(t * 0.5)          # negative = above home
+        vn     =  radius * omega * math.cos(t * omega)
+        ve     = -radius * omega * math.sin(t * omega)
+        vd     = -0.5 * 0.5 * math.cos(t * 0.5)
+        payload = struct.pack("<ffffff", north, east, down, vn, ve, vd)
+        sock.send(make_packet(0x0B, payload, next_seq(0x0B), ts))
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

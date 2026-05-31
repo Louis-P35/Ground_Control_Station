@@ -71,8 +71,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
         return true;
     }
 
-    // Track sequence numbers for types 0x01–0x0A
-    if (hdr->type >= 0x01 && hdr->type <= 0x0A)
+    // Track sequence numbers for types 0x01–0x0B
+    if (hdr->type >= 0x01 && hdr->type <= 0x0B)
         trackSeq(hdr->type, hdr->seq);
 
     // Dispatch by type
@@ -141,6 +141,20 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             std::memcpy(d.motor_percent, p.motor_percent, 8);
             d.wifi_rssi = p.wifi_rssi;
             emit statusReceived(d);
+            break;
+        }
+        case PKT_POSITION: {
+            if (totalSize < static_cast<int>(sizeof(PktPosition))) break;
+            PktPosition p; std::memcpy(&p, pkt, sizeof(p));
+            PositionData d;
+            d.north_m   = p.north_m;
+            d.east_m    = p.east_m;
+            d.down_m    = p.down_m;
+            d.vel_north = p.vel_north;
+            d.vel_east  = p.vel_east;
+            d.vel_down  = p.vel_down;
+            d.valid     = true; // A real fix arrived
+            emit positionReceived(d);
             break;
         }
         case PKT_PID: {
@@ -223,7 +237,7 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
 // Sequence tracking
 // ---------------------------------------------------------------------------
 void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
-    if (type == 0 || type > 0x0A) return;
+    if (type == 0 || type > 0x0B) return;
     auto& t = m_seqTracker[type];
     if (t.first) {
         t.lastSeq = seq;
@@ -239,7 +253,7 @@ void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
 }
 
 float PacketParser::packetLoss(uint8_t type) const {
-    if (type == 0 || type > 0x0A) return 0.0f;
+    if (type == 0 || type > 0x0B) return 0.0f;
     const auto& t = m_seqTracker[type];
     if (t.expected == 0) return 0.0f;
     float loss = 1.0f - static_cast<float>(t.received) / static_cast<float>(t.expected);
