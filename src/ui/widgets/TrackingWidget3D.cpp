@@ -38,6 +38,27 @@ namespace
     {
         return cur + (target - cur) * alpha;
     }
+
+    // Draw a stroke-font letter as GL line segments on the billboard plane
+    // spanned by (right, up), centred at `c`, scaled by `s`. Stroke coordinates
+    // are pairs of points in the unit square [0,1]² (origin bottom-left). The
+    // caller sets the colour. Using GL world vertices guarantees the letters
+    // land exactly where the axes do, through the same projection.
+    void drawStrokeLetter(const QVector3D& c, const QVector3D& right,
+                          const QVector3D& up, float s,
+                          const float* strokes, int strokeCount)
+    {
+        glBegin(GL_LINES);
+        for (int i = 0; i < strokeCount; ++i)
+        {
+            const float* q = strokes + i * 4;
+            const QVector3D a = c + right * ((q[0] - 0.5f) * s) + up * ((q[1] - 0.5f) * s);
+            const QVector3D b = c + right * ((q[2] - 0.5f) * s) + up * ((q[3] - 0.5f) * s);
+            glVertex3f(a.x(), a.y(), a.z());
+            glVertex3f(b.x(), b.y(), b.z());
+        }
+        glEnd();
+    }
 }
 
 TrackingWidget3D::TrackingWidget3D(QWidget* parent)
@@ -177,6 +198,10 @@ void TrackingWidget3D::paintGL()
     QMatrix4x4 view;
     view.lookAt(eye, m_lookAt, QVector3D(0.0f, 1.0f, 0.0f));
 
+    // Cache the view matrix: drawDroneAxes() uses its rows for the camera
+    // right/up vectors when billboarding the N/E/D letters.
+    m_view = view;
+
     // ── Adaptive back-off: keep the (real) drone inside the frame ───────────
     // Project the true drone position to normalised device coordinates. When it
     // drifts past the edge threshold, grow the back-off so the FOV re-covers it.
@@ -201,7 +226,12 @@ void TrackingWidget3D::paintGL()
         }
     }
 
-    // ── Render ──────────────────────────────────────────────────────────────
+    // ── Render the 3D scene (fixed-function GL) ─────────────────────────────
+    glViewport(0, 0, m_viewW, m_viewH);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glMatrixMode(GL_PROJECTION);
@@ -217,6 +247,7 @@ void TrackingWidget3D::paintGL()
     drawGrid();
     drawTrail();
     drawDrone();
+    drawDroneAxes();
 
     // ── Keep animating until everything has settled ─────────────────────────
     // This drives the easing without a fixed-rate timer: repaints stop once the
@@ -259,6 +290,59 @@ void TrackingWidget3D::drawGrid()
     glEnd();
 }
 
+void TrackingWidget3D::drawDroneAxes()
+{
+    // NED reference triad centred on the drone body (origin at the cube centre).
+    // It translates with the drone but does NOT rotate with the attitude — the
+    // axes always point along world North/East/Down. Drawn on top (no depth
+    // test) so it stays visible even when an arm would occlude it. Axis → world:
+    //   X = North → −Z (red),  Y = East → +X (green),  Z = Down → −Y (blue).
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(2.0f);
+
+    const QVector3D& o = m_dronePos;
+    const float L = 1.6f;
+    glBegin(GL_LINES);
+    glColor3f(0.95f, 0.25f, 0.25f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x(),     o.y(),     o.z() - L); // N
+    glColor3f(0.30f, 0.85f, 0.30f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x() + L, o.y(),     o.z());     // E
+    glColor3f(0.35f, 0.55f, 1.00f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x(),     o.y() - L, o.z());     // D
+    glEnd();
+
+    // ── Axis letters (N/E/D), drawn as billboarded GL strokes just past each
+    // axis tip so they always sit exactly at the ends, facing the camera. ────
+    // Camera right/up in world space are the first two rows of the view matrix.
+    const QVector3D right = m_view.row(0).toVector3D();
+    const QVector3D up    = m_view.row(1).toVector3D();
+    const float Loff = L + 0.35f; // Letter centre, just beyond the tip
+    const float ls   = 0.45f;     // Letter size (m)
+
+    // Stroke fonts in the unit square (bottom-left origin), as {x1,y1,x2,y2}.
+    static const float strokesN[] =
+    {
+        0,0, 0,1,   0,1, 1,0,   1,0, 1,1,
+    };
+    static const float strokesE[] =
+    {
+        1,1, 0,1,   0,1, 0,0,   0,0, 1,0,   0,0.5f, 0.75f,0.5f,
+    };
+    static const float strokesD[] =
+    {
+        0,0, 0,1,   0,1, 0.6f,1,   0.6f,1, 1,0.65f,
+        1,0.65f, 1,0.35f,   1,0.35f, 0.6f,0,   0.6f,0, 0,0,
+    };
+
+    glColor3f(0.95f, 0.25f, 0.25f);
+    drawStrokeLetter(o + QVector3D(0.0f, 0.0f, -Loff), right, up, ls, strokesN, 3);
+    glColor3f(0.30f, 0.85f, 0.30f);
+    drawStrokeLetter(o + QVector3D(Loff, 0.0f, 0.0f), right, up, ls, strokesE, 4);
+    glColor3f(0.35f, 0.55f, 1.00f);
+    drawStrokeLetter(o + QVector3D(0.0f, -Loff, 0.0f), right, up, ls, strokesD, 6);
+
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
+}
+
 void TrackingWidget3D::drawTrail()
 {
     // No trail until we have a real position fix.
@@ -269,7 +353,12 @@ void TrackingWidget3D::drawTrail()
 
     glDisable(GL_LIGHTING);
     glEnable(GL_BLEND);
+    // Re-assert the blend function every frame: the QPainter overlay resets it,
+    // so relying on the one set in initializeGL() would leave alpha ignored and
+    // the trail would render at uniform opacity (no fade).
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE); // Trail should not occlude itself or the drone
+    glLineWidth(3.0f);     // Thicker than the 1 px grid lines
 
     glBegin(GL_LINE_STRIP);
     const int   n    = static_cast<int>(m_trail.size());
@@ -284,6 +373,7 @@ void TrackingWidget3D::drawTrail()
     }
     glEnd();
 
+    glLineWidth(1.0f); // Restore default so other line primitives stay thin
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }

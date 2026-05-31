@@ -3,6 +3,8 @@
 #include <QOpenGLFunctions>
 #include <QElapsedTimer>
 #include <QVector3D>
+#include <QMatrix4x4>
+#include <QPointF>
 #include <deque>
 #include "backend/TelemetryState.h"
 
@@ -62,6 +64,7 @@ private:
     void drawGrid();
     void drawTrail();
     void drawDrone();
+    void drawDroneAxes();  // NED reference triad + N/E/D letters on the drone (GL)
     void drawArm(float angleRad, float armLen, float thickness);
     void drawRotor(float x, float y, float z, float radius);
     void drawBody();
@@ -103,4 +106,8 @@ private:
     QElapsedTimer m_frameTimer;
     bool          m_initialised = false;
     int           m_viewW = 1, m_viewH = 1;
+
+    // View matrix cached each frame; drawDroneAxes() uses its rows as the camera
+    // right/up vectors to billboard the N/E/D letters toward the viewer.
+    QMatrix4x4 m_view;
 };
