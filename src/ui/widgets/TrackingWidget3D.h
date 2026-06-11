@@ -14,7 +14,7 @@
 // Renders, using the same fixed-function OpenGL pipeline as DroneWidget3D:
 //   • a flat 20×20 m ground grid (1 m spacing) centred on the origin,
 //   • the quadcopter model, oriented by the live attitude quaternion and
-//     translated to its NED position (or floating at the scene centre when no
+//     translated to its NWU position (or floating at the scene centre when no
 //     position fix is available yet),
 //   • a fading blue movement trail of the last N positions.
 //
@@ -23,10 +23,10 @@
 // and supports manual wheel-zoom and right-drag orbit that temporarily override
 // the automatic follow for 3 seconds before easing back.
 //
-// Frame conversion — NED (north, east, down) → OpenGL world (X right, Y up,
+// Frame conversion — NWU (north, west, up) → OpenGL world (X right, Y up,
 // Z toward camera):
-//     world_x =  east_m         (East  → +X)
-//     world_y = -down_m         (Down  → −Y, i.e. NED down becomes OpenGL up)
+//     world_x = -west_m         (West  → −X, i.e. East is OpenGL +X)
+//     world_y =  up_m           (Up    → +Y)
 //     world_z = -north_m        (North → −Z, into the screen)
 // The attitude quaternion is remapped with the exact same axis convention as
 // DroneWidget3D so both views agree on orientation.
@@ -64,14 +64,14 @@ private:
     void drawGrid();
     void drawTrail();
     void drawDrone();
-    void drawDroneAxes();  // NED reference triad + N/E/D letters on the drone (GL)
+    void drawDroneAxes();  // NWU reference triad + N/W/U letters on the drone (GL)
     void drawArm(float angleRad, float armLen, float thickness);
     void drawRotor(float x, float y, float z, float radius);
     void drawBody();
     void quaternionToMatrix(float qw, float qx, float qy, float qz, float m[16]) const;
 
-    // ── NED → OpenGL world conversion ──────────────────────────────────────
-    static QVector3D nedToWorld(float north_m, float east_m, float down_m);
+    // ── NWU → OpenGL world conversion ──────────────────────────────────────
+    static QVector3D nwuToWorld(float north_m, float west_m, float up_m);
 
     // ── Attitude (already remapped to OpenGL axes) ─────────────────────────
     float m_qw = 1, m_qx = 0, m_qy = 0, m_qz = 0;

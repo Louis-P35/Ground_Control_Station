@@ -71,8 +71,8 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
         return true;
     }
 
-    // Track sequence numbers for types 0x01–0x0B
-    if (hdr->type >= 0x01 && hdr->type <= 0x0B)
+    // Track sequence numbers for types 0x01–0x0C
+    if (hdr->type >= 0x01 && hdr->type <= 0x0C)
         trackSeq(hdr->type, hdr->seq);
 
     // Dispatch by type
@@ -148,13 +148,23 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
             PktPosition p; std::memcpy(&p, pkt, sizeof(p));
             PositionData d;
             d.north_m   = p.north_m;
-            d.east_m    = p.east_m;
-            d.down_m    = p.down_m;
+            d.west_m    = p.west_m;
+            d.up_m      = p.up_m;
             d.vel_north = p.vel_north;
-            d.vel_east  = p.vel_east;
-            d.vel_down  = p.vel_down;
+            d.vel_west  = p.vel_west;
+            d.vel_up    = p.vel_up;
             d.valid     = true; // A real fix arrived
             emit positionReceived(d);
+            break;
+        }
+        case PKT_MAG: {
+            if (totalSize < static_cast<int>(sizeof(PktMag))) break;
+            PktMag p; std::memcpy(&p, pkt, sizeof(p));
+            MagData d;
+            d.x = p.x;
+            d.y = p.y;
+            d.z = p.z;
+            emit magReceived(d);
             break;
         }
         case PKT_PID: {
@@ -237,7 +247,7 @@ bool PacketParser::tryParseOne(const uint8_t* data, int available, int& offset) 
 // Sequence tracking
 // ---------------------------------------------------------------------------
 void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
-    if (type == 0 || type > 0x0B) return;
+    if (type == 0 || type > 0x0C) return;
     auto& t = m_seqTracker[type];
     if (t.first) {
         t.lastSeq = seq;
@@ -253,7 +263,7 @@ void PacketParser::trackSeq(uint8_t type, uint16_t seq) {
 }
 
 float PacketParser::packetLoss(uint8_t type) const {
-    if (type == 0 || type > 0x0B) return 0.0f;
+    if (type == 0 || type > 0x0C) return 0.0f;
     const auto& t = m_seqTracker[type];
     if (t.expected == 0) return 0.0f;
     float loss = 1.0f - static_cast<float>(t.received) / static_cast<float>(t.expected);

@@ -14,22 +14,25 @@ DroneWidget3D::DroneWidget3D(QWidget* parent)
 }
 
 void DroneWidget3D::updateAttitude(const AttitudeData& d) {
-    // The drone AHRS uses the ZYX Euler / NED body-frame convention:
-    //   d.qx  ↔  roll  (rotation around the longitudinal / forward axis)
-    //   d.qy  ↔  pitch (rotation around the lateral / right axis)
-    //   d.qz  ↔  yaw   (rotation around the vertical axis)
+    // The drone's AHRS (Madgwick filter on the STM32) outputs a body→world
+    // quaternion expressed in the NWU world frame (North, West, Up), with an
+    // FLU body (Forward, Left, Up) that coincides with NWU at identity.
     //
-    // The 3D model is rendered in OpenGL axes (X = viewer-right, Y = up,
-    // Z = toward camera = drone front).  We remap so that each physical
-    // motion drives the correct OpenGL axis:
+    // We render in OpenGL axes (X = viewer-right, Y = up, Z = toward camera).
+    // To show the attitude faithfully we must view it through the SAME fixed
+    // NWU → OpenGL change of basis used everywhere else in the GCS:
+    //     North → −Z,   West → −X,   Up → +Y
+    // Re-expressing the rotation in that basis is a conjugation R_gl = S·R·Sᵀ,
+    // which — because S is a signed-axis permutation — reduces to permuting and
+    // sign-flipping the quaternion's vector part: (qx,qy,qz) ↦ S·(qx,qy,qz).
     //
-    //   pitch up   → OGL X− rotation (OGL X+ would send the nose DOWN)
-    //   yaw right  → OGL Y+ rotation (OGL Y+ sends front toward +X = right) ✓
-    //   roll right → OGL Z− rotation (OGL Z+ would lift the right wing UP)
+    // S·(qx,qy,qz) = (−qy, qz, −qx), giving the remap below. This is the unique
+    // remap that stays consistent across roll, pitch and yaw; any other choice
+    // (e.g. an extra 180° about an axis) inverts some axes relative to others.
     m_qw =  d.qw;
-    m_qx = -d.qy;   // pitch → −OGL X
-    m_qy =  d.qz;   // yaw   → +OGL Y
-    m_qz = -d.qx;   // roll  → −OGL Z
+    m_qx = -d.qy;
+    m_qy =  d.qz;
+    m_qz = -d.qx;
     update();
 }
 

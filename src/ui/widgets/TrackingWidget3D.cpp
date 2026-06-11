@@ -13,8 +13,8 @@
 namespace
 {
     // Base follow pose, expressed as the world offset (0, +4 up, +8 behind).
-    // This is the requested NED offset (0, −8, +4) reinterpreted so the camera
-    // sits behind (south, +Z) and above (+Y) the drone, looking down at it.
+    // This is the requested offset reinterpreted so the camera sits behind
+    // (south, +Z) and above (+Y) the drone, looking down at it.
     const float kBaseDistance  = std::sqrt(4.0f * 4.0f + 8.0f * 8.0f); // ≈ 8.944 m
     const float kBaseElevation = std::atan2(4.0f, 8.0f);               // ≈ 26.57°
     const float kBaseAzimuth   = 0.0f;
@@ -76,12 +76,12 @@ TrackingWidget3D::TrackingWidget3D(QWidget* parent)
 }
 
 // ---------------------------------------------------------------------------
-// NED → OpenGL world conversion (see header for the full rationale).
-//     world_x =  east        world_y = -down        world_z = -north
+// NWU → OpenGL world conversion (see header for the full rationale).
+//     world_x = -west        world_y =  up          world_z = -north
 // ---------------------------------------------------------------------------
-QVector3D TrackingWidget3D::nedToWorld(float north_m, float east_m, float down_m)
+QVector3D TrackingWidget3D::nwuToWorld(float north_m, float west_m, float up_m)
 {
-    return QVector3D(east_m, -down_m, -north_m);
+    return QVector3D(-west_m, up_m, -north_m);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +90,11 @@ QVector3D TrackingWidget3D::nedToWorld(float north_m, float east_m, float down_m
 
 void TrackingWidget3D::updateAttitude(const AttitudeData& d)
 {
+    // The drone's attitude quaternion is body→world in the NWU world frame.
     // Identical axis remap to DroneWidget3D so both views agree on orientation:
-    //   pitch up   → −OGL X      yaw right → +OGL Y      roll right → −OGL Z
+    // a conjugation by the fixed NWU → OpenGL basis (N→−Z, W→−X, U→+Y), which
+    // is the same change of basis as nwuToWorld() and the N/W/U triad.
+    // See DroneWidget3D::updateAttitude for the full derivation.
     m_qw =  d.qw;
     m_qx = -d.qy;
     m_qy =  d.qz;
@@ -107,7 +110,7 @@ void TrackingWidget3D::updatePosition(const PositionData& d)
     }
 
     m_hasPosition = true;
-    m_dronePos    = nedToWorld(d.north_m, d.east_m, d.down_m);
+    m_dronePos    = nwuToWorld(d.north_m, d.west_m, d.up_m);
 
     // Append to the trail, dropping the oldest sample beyond the configured cap.
     m_trail.push_back(m_dronePos);
@@ -292,11 +295,11 @@ void TrackingWidget3D::drawGrid()
 
 void TrackingWidget3D::drawDroneAxes()
 {
-    // NED reference triad centred on the drone body (origin at the cube centre).
+    // NWU reference triad centred on the drone body (origin at the cube centre).
     // It translates with the drone but does NOT rotate with the attitude — the
-    // axes always point along world North/East/Down. Drawn on top (no depth
+    // axes always point along world North/West/Up. Drawn on top (no depth
     // test) so it stays visible even when an arm would occlude it. Axis → world:
-    //   X = North → −Z (red),  Y = East → +X (green),  Z = Down → −Y (blue).
+    //   X = North → −Z (red),  Y = West → −X (green),  Z = Up → +Y (blue).
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
     glLineWidth(2.0f);
@@ -305,11 +308,11 @@ void TrackingWidget3D::drawDroneAxes()
     const float L = 1.6f;
     glBegin(GL_LINES);
     glColor3f(0.95f, 0.25f, 0.25f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x(),     o.y(),     o.z() - L); // N
-    glColor3f(0.30f, 0.85f, 0.30f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x() + L, o.y(),     o.z());     // E
-    glColor3f(0.35f, 0.55f, 1.00f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x(),     o.y() - L, o.z());     // D
+    glColor3f(0.30f, 0.85f, 0.30f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x() - L, o.y(),     o.z());     // W
+    glColor3f(0.35f, 0.55f, 1.00f); glVertex3f(o.x(), o.y(), o.z()); glVertex3f(o.x(),     o.y() + L, o.z());     // U
     glEnd();
 
-    // ── Axis letters (N/E/D), drawn as billboarded GL strokes just past each
+    // ── Axis letters (N/W/U), drawn as billboarded GL strokes just past each
     // axis tip so they always sit exactly at the ends, facing the camera. ────
     // Camera right/up in world space are the first two rows of the view matrix.
     const QVector3D right = m_view.row(0).toVector3D();
@@ -322,22 +325,21 @@ void TrackingWidget3D::drawDroneAxes()
     {
         0,0, 0,1,   0,1, 1,0,   1,0, 1,1,
     };
-    static const float strokesE[] =
+    static const float strokesW[] =
     {
-        1,1, 0,1,   0,1, 0,0,   0,0, 1,0,   0,0.5f, 0.75f,0.5f,
+        0,1, 0.25f,0,   0.25f,0, 0.5f,0.6f,   0.5f,0.6f, 0.75f,0,   0.75f,0, 1,1,
     };
-    static const float strokesD[] =
+    static const float strokesU[] =
     {
-        0,0, 0,1,   0,1, 0.6f,1,   0.6f,1, 1,0.65f,
-        1,0.65f, 1,0.35f,   1,0.35f, 0.6f,0,   0.6f,0, 0,0,
+        0,1, 0,0,   0,0, 1,0,   1,0, 1,1,
     };
 
     glColor3f(0.95f, 0.25f, 0.25f);
     drawStrokeLetter(o + QVector3D(0.0f, 0.0f, -Loff), right, up, ls, strokesN, 3);
     glColor3f(0.30f, 0.85f, 0.30f);
-    drawStrokeLetter(o + QVector3D(Loff, 0.0f, 0.0f), right, up, ls, strokesE, 4);
+    drawStrokeLetter(o + QVector3D(-Loff, 0.0f, 0.0f), right, up, ls, strokesW, 4);
     glColor3f(0.35f, 0.55f, 1.00f);
-    drawStrokeLetter(o + QVector3D(0.0f, -Loff, 0.0f), right, up, ls, strokesD, 6);
+    drawStrokeLetter(o + QVector3D(0.0f, Loff, 0.0f), right, up, ls, strokesU, 3);
 
     glLineWidth(1.0f);
     glEnable(GL_DEPTH_TEST);

@@ -31,7 +31,8 @@ static constexpr uint8_t PKT_LOG      = 0x07;
 static constexpr uint8_t PKT_BARO          = 0x08;
 static constexpr uint8_t PKT_CALIB_STATUS  = 0x09; // Drone → GCS: calibration progress
 static constexpr uint8_t PKT_FFT           = 0x0A; // Drone → GCS: FFT spectrum (sensor + axis)
-static constexpr uint8_t PKT_POSITION      = 0x0B; // Drone → GCS: NED position + velocity estimate
+static constexpr uint8_t PKT_POSITION      = 0x0B; // Drone → GCS: NWU position + velocity estimate
+static constexpr uint8_t PKT_MAG           = 0x0C; // Drone → GCS: filtered magnetometer (compass)
 
 // GCS → Drone
 static constexpr uint8_t PKT_SET_PID       = 0x10;
@@ -123,17 +124,30 @@ struct PktBaro {
     uint16_t crc;
 };
 
-// 0x0B — Drone → GCS: fused position estimate in the local NED frame.
-// The origin is the home/arming point. North/East are horizontal axes,
-// Down is positive toward the ground (so a climbing drone has down_m < 0).
+// 0x0B — Drone → GCS: fused position estimate in the local NWU frame.
+// The origin is the home/arming point. North/West are horizontal axes,
+// Up is positive away from the ground (so a climbing drone has up_m > 0).
+// NWU matches the world frame in which the drone's attitude quaternion is
+// expressed, so the GCS uses a single convention end to end.
 struct PktPosition {
     PacketHeader header;
-    float north_m;   // Position north of home, meters
-    float east_m;    // Position east  of home, meters
-    float down_m;    // Position below home, meters (positive = below origin)
+    float north_m;  // Position north of home, meters
+    float west_m;   // Position west  of home, meters
+    float up_m;     // Position above home, meters (positive = above origin)
     float vel_north; // Velocity north, m/s
-    float vel_east;  // Velocity east,  m/s
-    float vel_down;  // Velocity down,  m/s
+    float vel_west;  // Velocity west,  m/s
+    float vel_up;    // Velocity up,    m/s
+    uint16_t crc;
+};
+
+// 0x0C — Drone → GCS: filtered magnetometer reading from the FC, used to drive
+// the compass widget. Values are raw signed counts in the sensor frame; the GCS
+// derives the heading from the horizontal components.
+struct PktMag {
+    PacketHeader header;
+    int16_t x; // Magnetometer X, raw counts
+    int16_t y; // Magnetometer Y, raw counts
+    int16_t z; // Magnetometer Z, raw counts
     uint16_t crc;
 };
 

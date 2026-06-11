@@ -106,7 +106,8 @@ uint16_t crc; // CRC-16/CCITT over header + payload
 | `0x08` | Barometer (pressure, temperature, altitude) | 10 Hz |
 | `0x09` | Calibration status (per target) | On event |
 | `0x0A` | FFT spectrum (one sensor+axis per packet) | 2 Hz |
-| `0x0B` | Position (fused NED position + velocity) | 20 Hz |
+| `0x0B` | Position (fused NWU position + velocity) | 20 Hz |
+| `0x0C` | Magnetometer (filtered compass X/Y/Z) | 10 Hz |
 
 #### 0x01 — Attitude
 ```cpp
@@ -340,7 +341,7 @@ Joystick sits above compass in col 2 (each occupies 1 row).
 Row 2 right half (cols 2-3) is a horizontal info bar grouping barometer, GPS, status, and MTF-01 side by side.
 Row stretch ratios: rows 0 and 1 weight 2, row 2 weight 3 (terminal gets more vertical space).
 
-**Tab 1 — 3D Tracking**: third-person follow view (`TrackingWidget3D`) rendering the drone in a local NED scene — a 20×20 m ground grid, the quaternion-oriented drone model, and a fading blue movement trail of the last 300 positions. The camera follows from behind and above, automatically backs off when the drone nears the view edge, and supports manual wheel-zoom and right-drag orbit that override the follow for 3 s before easing back. Driven by `PktAttitude` (orientation) and `PktPosition` (NED position); the drone floats at the scene centre until the first position fix arrives.
+**Tab 1 — 3D Tracking**: third-person follow view (`TrackingWidget3D`) rendering the drone in a local NWU scene — a 20×20 m ground grid, the quaternion-oriented drone model, and a fading blue movement trail of the last 300 positions. The camera follows from behind and above, automatically backs off when the drone nears the view edge, and supports manual wheel-zoom and right-drag orbit that override the follow for 3 s before easing back. Driven by `PktAttitude` (orientation, NWU world frame) and `PktPosition` (NWU position); the drone floats at the scene centre until the first position fix arrives.
 
 **Tab 2 — Graph**: the real-time graph widget occupies the full tab area.
 

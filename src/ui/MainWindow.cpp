@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QStatusBar>
 #include <QApplication>
+#include <QtMath>
 #include "widgets/DroneWidget3D.h"
 #include "widgets/TrackingWidget3D.h"
 #include "widgets/CompassWidget.h"
@@ -80,7 +81,7 @@ MainWindow::~MainWindow() {
 //    Row 1: [3D                          ] [compass       ] [motors       ]
 //    Row 2: [terminal x2                   ] [baro|gps|status|mtf01         ]
 //
-//  Tab 1 "3D Tracking": Third-person follow view (drone + trail in NED scene)
+//  Tab 1 "3D Tracking": Third-person follow view (drone + trail in NWU scene)
 //  Tab 2 "Graph":       Full-window graph widget
 //  Tab 3 "Map":         Full-window map widget
 //  Tab 4 "Video":       Full-window video feed
@@ -263,6 +264,8 @@ void MainWindow::connectSignals() {
             this,   &MainWindow::onStatusReceived,          Qt::QueuedConnection);
     connect(parser, &PacketParser::positionReceived,
             this,   &MainWindow::onPositionReceived,        Qt::QueuedConnection);
+    connect(parser, &PacketParser::magReceived,
+            this,   &MainWindow::onMagReceived,             Qt::QueuedConnection);
     connect(parser, &PacketParser::pidReceived,
             this,   &MainWindow::onPidReceived,             Qt::QueuedConnection);
     connect(parser, &PacketParser::baroReceived,
@@ -318,9 +321,10 @@ void MainWindow::onAttitudeReceived(AttitudeData d) {
 void MainWindow::onGpsReceived(GpsData d) {
     m_state.updateGps(d);
     m_gps->updateData(d);
-    m_compass->setHeading(d.heading_deg);
     m_graph->pushGps(d);
     m_map->updatePosition(d);
+    // Note: the compass is driven by the magnetometer (onMagReceived), not the
+    // GPS course-over-ground, which is only meaningful while the drone is moving.
 }
 
 void MainWindow::onMtf01Received(Mtf01Data d) {
@@ -344,6 +348,20 @@ void MainWindow::onStatusReceived(StatusData d) {
 void MainWindow::onPositionReceived(PositionData d) {
     m_state.updatePosition(d);
     m_tracking->updatePosition(d);
+}
+
+void MainWindow::onMagReceived(MagData d) {
+    m_state.updateMag(d);
+
+    // Derive a compass heading from the horizontal magnetometer components.
+    // The drone world frame is NWU (X=North, Y=West): a compass heading is the
+    // clockwise angle from North toward East, i.e. atan2(East, North) with
+    // East = -West = -y. Normalised to [0, 360).
+    float heading = qRadiansToDegrees(std::atan2(-static_cast<float>(d.y),
+                                                  static_cast<float>(d.x)));
+    if (heading < 0.0f)
+        heading += 360.0f;
+    m_compass->setHeading(heading);
 }
 
 void MainWindow::onPidReceived(PidData d) {

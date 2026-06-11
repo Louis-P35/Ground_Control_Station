@@ -45,6 +45,7 @@ private slots:
     void onRadioReceived(RadioData d);
     void onStatusReceived(StatusData d);
     void onPositionReceived(PositionData d);
+    void onMagReceived(MagData d);
     void onPidReceived(PidData d);
     void onBaroReceived(BaroData d);
     void onCalibStatusReceived(uint8_t target, uint8_t status, uint8_t progress, QString message);

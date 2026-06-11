@@ -13,7 +13,8 @@ Packet rates:
   0x08 Baro           —  10 Hz
   0x09 CalibStatus    —   1 Hz (reacts to PKT_CALIB_CMD from GCS)
   0x0A FFT            —   2 Hz (6 sensor×axis combinations)
-  0x0B Position (NED) —  20 Hz
+  0x0B Position (NWU) —  20 Hz
+  0x0C Magnetometer   —  10 Hz
 """
 
 import socket
@@ -373,21 +374,34 @@ def simulate(sock, t: float):
                 payload += struct.pack(f"<{FFT_BIN_COUNT}f", *full)
                 sock.send(make_packet(0x0A, payload, next_seq(0x0A), ts))
 
-    # ── 0x0B Position (NED, 20 Hz) ───────────────────────────────────
+    # ── 0x0B Position (NWU, 20 Hz) ───────────────────────────────────
     # A gentle circular flight path within the 20×20 m scene, with a slow
-    # vertical bob. NED: north/east are horizontal, down is positive toward
-    # the ground (so a drone above home has down < 0).
+    # vertical bob. NWU: north/west are horizontal, up is positive away from
+    # the ground (so a drone above home has up > 0).
     if int(t * 100) % 5 == 0:
         radius = 6.0
         omega  = 0.25
         north  = radius * math.sin(t * omega)
-        east   = radius * math.cos(t * omega)
-        down   = -2.5 - 0.5 * math.sin(t * 0.5)          # negative = above home
+        west   = radius * math.cos(t * omega)
+        up     = 2.5 + 0.5 * math.sin(t * 0.5)           # positive = above home
         vn     =  radius * omega * math.cos(t * omega)
-        ve     = -radius * omega * math.sin(t * omega)
-        vd     = -0.5 * 0.5 * math.cos(t * 0.5)
-        payload = struct.pack("<ffffff", north, east, down, vn, ve, vd)
+        vw     = -radius * omega * math.sin(t * omega)
+        vu     =  0.5 * 0.5 * math.cos(t * 0.5)
+        payload = struct.pack("<ffffff", north, west, up, vn, vw, vu)
         sock.send(make_packet(0x0B, payload, next_seq(0x0B), ts))
+
+    # ── 0x0C Magnetometer (10 Hz) ────────────────────────────────────
+    # Slowly rotating heading so the compass widget visibly sweeps. The GCS
+    # derives heading = atan2(-y, x) in the NWU frame (X=North, Y=West), so a
+    # heading θ (clockwise from North) maps to x=cos θ, y=-sin θ.
+    if int(t * 100) % 10 == 0:
+        heading = math.radians((t * 20.0) % 360.0)       # 20°/s sweep
+        amp     = 300.0
+        mx = int(amp * math.cos(heading))
+        my = int(-amp * math.sin(heading))
+        mz = -400
+        payload = struct.pack("<hhh", mx, my, mz)
+        sock.send(make_packet(0x0C, payload, next_seq(0x0C), ts))
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

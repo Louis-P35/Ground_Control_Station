@@ -25,6 +25,7 @@ private slots:
         qRegisterMetaType<RadioData>();
         qRegisterMetaType<StatusData>();
         qRegisterMetaType<PositionData>();
+        qRegisterMetaType<MagData>();
         qRegisterMetaType<PidData>();
         qRegisterMetaType<BaroData>();
         qRegisterMetaType<FftData>();
@@ -147,22 +148,39 @@ private slots:
 
         PktPosition p{};
         p.north_m   = 12.5f;
-        p.east_m    = -3.25f;
-        p.down_m    = -8.0f; // 8 m above home
+        p.west_m    = -3.25f;
+        p.up_m      = 8.0f; // 8 m above home
         p.vel_north = 1.5f;
-        p.vel_east  = -0.5f;
-        p.vel_down  = 0.25f;
+        p.vel_west  = -0.5f;
+        p.vel_up    = 0.25f;
         parser.parse(TestHelpers::buildPacket(PKT_POSITION, p));
 
         QCOMPARE(spy.count(), 1);
         auto d = spy.at(0).at(0).value<PositionData>();
         QCOMPARE(d.north_m,   12.5f);
-        QCOMPARE(d.east_m,    -3.25f);
-        QCOMPARE(d.down_m,    -8.0f);
+        QCOMPARE(d.west_m,    -3.25f);
+        QCOMPARE(d.up_m,       8.0f);
         QCOMPARE(d.vel_north, 1.5f);
-        QCOMPARE(d.vel_east,  -0.5f);
-        QCOMPARE(d.vel_down,  0.25f);
+        QCOMPARE(d.vel_west,  -0.5f);
+        QCOMPARE(d.vel_up,    0.25f);
         QVERIFY(d.valid); // Parser flags a real fix
+    }
+
+    void magValid() {
+        PacketParser parser;
+        QSignalSpy spy(&parser, &PacketParser::magReceived);
+
+        PktMag p{};
+        p.x =  300;
+        p.y = -150;
+        p.z = -400;
+        parser.parse(TestHelpers::buildPacket(PKT_MAG, p));
+
+        QCOMPARE(spy.count(), 1);
+        auto d = spy.at(0).at(0).value<MagData>();
+        QCOMPARE(d.x,  static_cast<int16_t>(300));
+        QCOMPARE(d.y,  static_cast<int16_t>(-150));
+        QCOMPARE(d.z,  static_cast<int16_t>(-400));
     }
 
     void pidValid() {

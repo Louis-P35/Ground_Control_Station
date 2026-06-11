@@ -34,6 +34,7 @@ signals:
     void radioReceived   (RadioData);
     void statusReceived  (StatusData);
     void positionReceived(PositionData);
+    void magReceived     (MagData);
     void pidReceived     (PidData);
     void baroReceived        (BaroData);
     void calibStatusReceived (uint8_t target, uint8_t status, uint8_t progress, QString message);
@@ -47,14 +48,14 @@ private:
 
     static uint16_t crc16(const uint8_t* data, int len);
 
-    // Sequence tracking for packet loss computation (indexed by type 0x01–0x0B)
+    // Sequence tracking for packet loss computation (indexed by type 0x01–0x0C)
     struct SeqTracker {
         uint16_t lastSeq  = 0;
         uint32_t received = 0;
         uint32_t expected = 0;
         bool     first    = true;
     };
-    std::array<SeqTracker, 12> m_seqTracker; // index = type (0 unused, 0x01–0x0B)
+    std::array<SeqTracker, 13> m_seqTracker; // index = type (0 unused, 0x01–0x0C)
     void trackSeq(uint8_t type, uint16_t seq);
 
     // Throttle sync-error logging: at most one warning per second to avoid
