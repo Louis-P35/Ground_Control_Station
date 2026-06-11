@@ -8,6 +8,8 @@
 #include "Mtf01Reader.h"
 #include "SbusReader.h"
 #include "GpsReader.h"
+#include "MagReader.h"
+#include "Bmp180Reader.h"
 
 // ---------------------------------------------------------------------------
 // Network configuration
@@ -23,6 +25,10 @@ static const uint32_t WIFI_TIMEOUT_MS = 10000;
 static const uint16_t GCS_PORT        = 5005;
 static const uint16_t LOCAL_PORT      = 5005;
 
+// I2C pins for the BN-880 on-board compass (HMC5883L / QMC5883L)
+static const int MAG_SDA_PIN = 21;
+static const int MAG_SCL_PIN = 22;
+
 // ---------------------------------------------------------------------------
 // Globals
 // ---------------------------------------------------------------------------
@@ -31,6 +37,8 @@ static SpiSlave    g_spi;
 static Mtf01Reader g_mtf01;
 static SbusReader  g_sbus;
 static GpsReader   g_gps;
+static MagReader   g_mag;
+static Bmp180Reader g_baro;
 static WiFiUDP     g_udp;
 static IPAddress   g_broadcastIp;
 
@@ -104,18 +112,21 @@ static void sendAttitude(const SpiPayloadAttitude& d)
 }
 
 // ---------------------------------------------------------------------------
-// sendMtf01 — forward MTF-01 data as PKT_MTF01 to the GCS
+// sendMtf01 — forward MTF-01 data (echoed back by the FC over SPI) as
+// PKT_MTF01 to the GCS. The ESP32 no longer relays its own UART reading
+// directly: the value travels ESP32 → FC (MISO) → FC → ESP32 (MOSI), exactly
+// like the S.Bus → processed-radio round trip.
 // ---------------------------------------------------------------------------
 
-static void sendMtf01(const Mtf01Reader& mtf)
+static void sendMtf01(const SpiPayloadMtf01& m)
 {
     PktMtf01 pkt{};
     fillHeader(pkt.header, PKT_MTF01,
                sizeof(PktMtf01) - sizeof(PacketHeader) - sizeof(uint16_t));
-    pkt.distance_m = mtf.distance();
-    pkt.flow_x     = static_cast<float>(mtf.flowX());
-    pkt.flow_y     = static_cast<float>(mtf.flowY());
-    pkt.quality    = mtf.quality();
+    pkt.distance_m = m.distance_m;
+    pkt.flow_x     = static_cast<float>(m.flow_x);
+    pkt.flow_y     = static_cast<float>(m.flow_y);
+    pkt.quality    = m.quality;
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
     sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
@@ -190,21 +201,23 @@ static void sendLog(const char* msg, uint8_t level = 1 /* INFO */)
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// sendGps — forward GPS fix as PKT_GPS to the GCS
+// sendGps — forward a GPS fix (echoed back by the FC over SPI) as PKT_GPS to
+// the GCS. Same round trip as sendMtf01(): the ESP32 reads the BN-880, hands
+// the fix to the FC over MISO, and relays whatever the FC sends back on MOSI.
 // ---------------------------------------------------------------------------
 
-static void sendGps(const GpsReader& gps)
+static void sendGps(const SpiPayloadGps& g)
 {
     PktGps pkt{};
     fillHeader(pkt.header, PKT_GPS,
                sizeof(PktGps) - sizeof(PacketHeader) - sizeof(uint16_t));
-    pkt.latitude    = gps.latitude();
-    pkt.longitude   = gps.longitude();
-    pkt.altitude_m  = gps.altitude();
-    pkt.speed_ms    = gps.speed();
-    pkt.heading_deg = gps.heading();
-    pkt.satellites  = gps.satellites();
-    pkt.fix_type    = gps.fixType();
+    pkt.latitude    = g.latitude;
+    pkt.longitude   = g.longitude;
+    pkt.altitude_m  = g.altitude_m;
+    pkt.speed_ms    = g.speed_ms;
+    pkt.heading_deg = g.heading_deg;
+    pkt.satellites  = g.satellites;
+    pkt.fix_type    = g.fix_type;
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
     sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
@@ -232,6 +245,80 @@ static void sendRadio(const SpiPayloadRadio& r)
     pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
                     sizeof(PacketHeader) + pkt.header.payload_len);
     sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// sendMag — forward the FC-filtered magnetometer (received via SPI) as PKT_MAG
+// to the GCS, where it drives the compass widget. Same round trip as GPS.
+// ---------------------------------------------------------------------------
+
+static void sendMag(const SpiPayloadMag& m)
+{
+    PktMag pkt{};
+    fillHeader(pkt.header, PKT_MAG,
+               sizeof(PktMag) - sizeof(PacketHeader) - sizeof(uint16_t));
+    pkt.x = m.x;
+    pkt.y = m.y;
+    pkt.z = m.z;
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// sendBaro — forward a BMP180 reading straight to the GCS as PKT_BARO, where it
+// drives the barometer widget.
+//
+// NOTE: unlike GPS / MTF-01 / magnetometer, this is a DIRECT ESP32 → GCS path
+// for now — a first debug pass to confirm the I2C sensor works. It does not yet
+// go through the FC over SPI. Once validated it should follow the same SPI
+// round trip as the other sensors (expose the reading on MISO, relay the value
+// the FC echoes back on MOSI).
+// ---------------------------------------------------------------------------
+
+static void sendBaro(float pressurePa, float temperatureC, float altitudeM)
+{
+    PktBaro pkt{};
+    fillHeader(pkt.header, PKT_BARO,
+               sizeof(PktBaro) - sizeof(PacketHeader) - sizeof(uint16_t));
+    pkt.pressure_pa   = pressurePa;
+    pkt.temperature_c = temperatureC;
+    pkt.altitude_m    = altitudeM;
+    pkt.crc = crc16(reinterpret_cast<const uint8_t*>(&pkt),
+                    sizeof(PacketHeader) + pkt.header.payload_len);
+    sendPacket(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+}
+
+// ---------------------------------------------------------------------------
+// scanI2cBus — probe every 7-bit address and log which ones ACK. Pure debug
+// aid: lets us see exactly what sits on the bus (and at which address) instead
+// of guessing. The BN-880 compass answers at 0x0D or 0x1E, a genuine BMP180 at
+// 0x77, a BMP280 often at 0x76.
+// ---------------------------------------------------------------------------
+
+static void scanI2cBus()
+{
+    char    found[96] = {0};
+    size_t  len = 0;
+    uint8_t count = 0;
+
+    for (uint8_t addr = 1; addr < 127; ++addr)
+    {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) // device ACKed
+        {
+            ++count;
+            len += snprintf(found + len, sizeof(found) - len, " 0x%02X", addr);
+            if (len >= sizeof(found) - 6) break;
+        }
+    }
+
+    char msg[128];
+    if (count == 0)
+        snprintf(msg, sizeof(msg), "[I2C] scan: no device responding on SDA=21 SCL=22");
+    else
+        snprintf(msg, sizeof(msg), "[I2C] scan: %u device(s):%s", count, found);
+    sendLog(msg, count == 0 ? 3 /* ERROR */ : 1 /* INFO */);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +388,35 @@ void setup()
     // ── S.Bus receiver (Serial2, GPIO 16 RX / 17 TX, 100000 baud 8E2 inv.) ──
     g_sbus.begin(Serial2, 16, 17);
 
-    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 + S.Bus + GPS active");
+    // ── Magnetometer (BN-880 compass, I2C SDA=21 SCL=22) ────────────────────
+    Wire.begin(MAG_SDA_PIN, MAG_SCL_PIN);
+
+    // Debug: report every address present on the bus before probing sensors.
+    scanI2cBus();
+
+    if (g_mag.begin())
+    {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "[MAG] %s detected on I2C", g_mag.chipName());
+        sendLog(msg);
+    }
+    else
+    {
+        sendLog("[MAG] no compass found on I2C (QMC5883L 0x0D / HMC5883L 0x1E)",
+                3 /* ERROR */);
+    }
+
+    // ── Barometer (BMP180, same I2C bus, address 0x77) ──────────────────────
+    if (g_baro.begin())
+    {
+        sendLog("[BARO] BMP180 detected on I2C (0x77)");
+    }
+    else
+    {
+        sendLog("[BARO] no BMP180 found on I2C (0x77)", 3 /* ERROR */);
+    }
+
+    sendLog("[ESP32] Boot complete — SPI slave + MTF-01 + S.Bus + GPS + MAG + BARO active");
 }
 
 // ---------------------------------------------------------------------------
@@ -314,10 +429,18 @@ void loop()
     g_gps.update();
 
     // ── MTF-01: drain UART RX buffer and parse MAVLink frames ────────────────
+    // The raw reading is written into the SPI MISO buffer so the FC can read it.
+    // The ESP32 no longer forwards it to the GCS directly; the FC echoes the
+    // value back over MOSI and we relay that (mirrors the S.Bus → radio path).
     g_mtf01.update();
     if (g_mtf01.newData())
     {
-        sendMtf01(g_mtf01);
+        SpiPayloadMtf01 m{};
+        m.distance_m = g_mtf01.distance();
+        m.flow_x     = g_mtf01.flowX();
+        m.flow_y     = g_mtf01.flowY();
+        m.quality    = g_mtf01.quality();
+        g_spi.setMtf01(m);
     }
 
     // ── S.Bus: drain UART RX buffer and decode frames ────────────────────────
@@ -332,6 +455,54 @@ void loop()
             rawCh[i] = g_sbus.channel(i);
         }
         g_spi.setSbusRaw(rawCh, !g_sbus.failsafe());
+
+        // Debug: forward the raw receiver values straight to the GCS terminal
+        // (throttled to 5 Hz). This is the value read off the S.Bus UART before
+        // it goes to the FC — lets us confirm the receiver → ESP32 link works
+        // independently of the FC round trip.
+        static uint32_t s_lastSbusLogMs = 0;
+        if (millis() - s_lastSbusLogMs >= 200)
+        {
+            s_lastSbusLogMs = millis();
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                     "[SBUS] %s ch1-8: %u %u %u %u %u %u %u %u",
+                     g_sbus.failsafe() ? "FAILSAFE" : "ok",
+                     rawCh[0], rawCh[1], rawCh[2], rawCh[3],
+                     rawCh[4], rawCh[5], rawCh[6], rawCh[7]);
+            sendLog(msg);
+        }
+    }
+
+    // ── Magnetometer: read at 5 Hz and write raw X/Y/Z into the SPI MISO buffer
+    //    for the FC. Like GPS / MTF-01 the ESP32 no longer forwards it to the GCS
+    //    directly — the FC echoes it back over MOSI and we relay that.
+    static uint32_t s_lastMagMs = 0;
+    if (millis() - s_lastMagMs >= 200)
+    {
+        s_lastMagMs = millis();
+        if (g_mag.update())
+        {
+            SpiPayloadMag mag{};
+            mag.x = g_mag.x();
+            mag.y = g_mag.y();
+            mag.z = g_mag.z();
+            g_spi.setMag(mag);
+        }
+    }
+
+    // ── Barometer: read at 5 Hz and forward straight to the GCS (PKT_BARO) ────
+    //    First debug pass — direct ESP32 → GCS path, not through the FC over SPI
+    //    yet. The blocking read (~9 ms) is throttled so it does not starve the
+    //    100 Hz attitude relay.
+    static uint32_t s_lastBaroMs = 0;
+    if (millis() - s_lastBaroMs >= 200)
+    {
+        s_lastBaroMs = millis();
+        if (g_baro.update())
+        {
+            sendBaro(g_baro.pressurePa(), g_baro.temperatureC(), g_baro.altitudeM());
+        }
     }
 
     // ── SPI: drain one completed transaction per call ─────────────────────────
@@ -359,6 +530,22 @@ void loop()
         sendRadio(g_spi.radio());
         g_cntOther++;
     }
+    if (g_spi.newGps())
+    {
+        sendGps(g_spi.gps());
+        g_cntOther++;
+    }
+    if (g_spi.newMtf01())
+    {
+        sendMtf01(g_spi.mtf01());
+        g_cntOther++;
+    }
+    if (g_spi.newMag())
+    {
+        // FC-filtered compass → PKT_MAG → GCS compass widget.
+        sendMag(g_spi.mag());
+        g_cntOther++;
+    }
     if (g_spi.newLog())
     {
         sendLog(g_spi.log().text, g_spi.log().level);
@@ -371,8 +558,21 @@ void loop()
     {
         g_lastStatusMs = now;
 
-        // GPS — send at 1 Hz regardless of fix so the GCS always sees live data
-        sendGps(g_gps);
+        // GPS — hand the latest fix to the FC over SPI (MISO) at 1 Hz, even with
+        // no fix, so the FC always has live data. The FC echoes it back on MOSI
+        // and we relay that to the GCS (no direct ESP32 → GCS GPS path anymore).
+        {
+            SpiPayloadGps g{};
+            g.latitude    = g_gps.latitude();
+            g.longitude   = g_gps.longitude();
+            g.altitude_m  = g_gps.altitude();
+            g.speed_ms    = g_gps.speed();
+            g.heading_deg = g_gps.heading();
+            g.satellites  = g_gps.satellites();
+            g.fix_type    = g_gps.fixType();
+            g_spi.setGps(g);
+            g_gps.clearFix();
+        }
 
         // 1 Hz stats log visible in the GCS terminal
         {

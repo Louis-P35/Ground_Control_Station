@@ -19,11 +19,16 @@
 //
 //   ESP32 → FC (MISO):
 //     [magic 2B] [has_cmd 1B] [cmd_type 1B] [cmd 27B] [CRC16 2B]
-//     [has_sbus 1B] [sbus_raw 32B] [pad 190B]
+//     [has_sbus 1B] [sbus_raw 32B]
+//     [has_gps 1B] [gps 30B] [has_mtf01 1B] [mtf01 9B] [pad 149B]
 //
 //     The CRC covers only the command section (bytes 0–30, unchanged from the
 //     original protocol so the FC does not need to update its CRC check).
-//     The raw S.Bus section lives after the CRC in the padding area.
+//     The raw S.Bus / GPS / MTF-01 sensor sections live after the CRC in the
+//     padding area: the ESP32 reads those peripherals and exposes their values
+//     so the FC can consume them, exactly like the raw S.Bus channels. The FC
+//     then echoes processed GPS / MTF-01 back over MOSI for the ESP32 to relay
+//     to the GCS.
 // ---------------------------------------------------------------------------
 
 static constexpr size_t   SPI_FRAME_SIZE      = 256;
@@ -44,6 +49,9 @@ enum class SpiFrameType : uint8_t
     CalibStatus = 0x04, // on event — one calibration target
     Log         = 0x05, // on event — one log message
     Radio       = 0x06, //  50 Hz — processed radio channels from FC (1000–2000 µs)
+    Gps         = 0x07, //   1 Hz — GPS fix echoed back by the FC
+    Mtf01       = 0x08, //  ~rate — MTF-01 flow/range echoed back by the FC
+    Mag         = 0x09, //   5 Hz — magnetometer echoed back by the FC
 };
 
 // ---------------------------------------------------------------------------
@@ -105,6 +113,39 @@ struct SpiPayloadRadio
     uint8_t  rssi;                        // Signal quality 0–255
 };
 
+// GPS fix. Used in BOTH directions: the ESP32 puts the raw BN-880 reading on
+// MISO for the FC, and the FC echoes it back on MOSI for the ESP32 to relay
+// to the GCS (mirrors the S.Bus → Radio round trip).
+struct SpiPayloadGps
+{
+    double  latitude;     // Decimal degrees
+    double  longitude;    // Decimal degrees
+    float   altitude_m;   // Metres above sea level
+    float   speed_ms;     // Ground speed m/s
+    float   heading_deg;  // Course over ground, degrees
+    uint8_t satellites;
+    uint8_t fix_type;     // 0=none, 1=2D, 2=3D
+};
+
+// MTF-01 optical-flow + rangefinder. Same round-trip role as SpiPayloadGps.
+// Flow is carried as the raw signed dpix/s integers from the sensor.
+struct SpiPayloadMtf01
+{
+    float   distance_m; // Laser rangefinder, metres
+    int16_t flow_x;     // Optical flow X, raw dpix/s
+    int16_t flow_y;     // Optical flow Y, raw dpix/s
+    uint8_t quality;    // Flow quality 0–255
+};
+
+// BN-880 magnetometer (HMC5883L / QMC5883L). Same round-trip role as the GPS:
+// the ESP32 puts the raw counts on MISO, the FC echoes them back on MOSI.
+struct SpiPayloadMag
+{
+    int16_t x; // Raw magnetometer counts
+    int16_t y;
+    int16_t z;
+};
+
 // ---------------------------------------------------------------------------
 // Full fixed-size frames
 // ---------------------------------------------------------------------------
@@ -123,6 +164,9 @@ struct SpiRxFrame
         SpiPayloadCalibStatus calib;                //  67 bytes
         SpiPayloadLog         log;                  // 129 bytes
         SpiPayloadRadio       radio;                //  33 bytes
+        SpiPayloadGps         gps;                  //  30 bytes
+        SpiPayloadMtf01       mtf01;                //   9 bytes
+        SpiPayloadMag         mag;                  //   6 bytes
         uint8_t               raw[SPI_MAX_PAYLOAD]; // 248 bytes — sizes the union
     } payload;               // 248 bytes
     uint16_t crc;            //   2 bytes
@@ -132,14 +176,15 @@ static_assert(sizeof(SpiRxFrame) == SPI_FRAME_SIZE, "SpiRxFrame must be 256 byte
 
 // ESP32 → FC (MISO)
 //
-// The frame is split into two independent sections:
+// The frame is split into independent sections:
 //
-//   [0..32]  — Command section (GCS command forwarding, CRC-protected)
-//   [33..65] — S.Bus section   (raw receiver values, appended in padding)
-//   [66..255]— Zero padding
+//   [0..32]   — Command section (GCS command forwarding, CRC-protected)
+//   [33..65]  — S.Bus section   (raw receiver values, appended in padding)
+//   [66..113] — GPS + MTF-01 + magnetometer sections (raw sensor values)
+//   [114..255]— Zero padding
 //
 // The CRC covers only the command section so that the FC does not need to
-// update its CRC check to gain access to the S.Bus data.
+// update its CRC check to gain access to the raw sensor data.
 struct SpiTxFrame
 {
     // ── Command section (existing, CRC-protected) ────────────────────────────
@@ -157,15 +202,33 @@ struct SpiTxFrame
     uint8_t  has_sbus;                     // 1 = sbus_raw[] contains a valid frame
     uint16_t sbus_raw[SBUS_SPI_CHANNELS];  // Raw 11-bit SBUS values (0–2047)
 
+    // ── GPS section (raw BN-880 fix for the FC) ──────────────────────────────
+    uint8_t       has_gps;                 // 1 = gps holds a valid fix
+    SpiPayloadGps gps;
+
+    // ── MTF-01 section (raw optical-flow / range for the FC) ──────────────────
+    uint8_t         has_mtf01;             // 1 = mtf01 holds a fresh reading
+    SpiPayloadMtf01 mtf01;
+
+    // ── Magnetometer section (raw compass counts for the FC) ──────────────────
+    uint8_t       has_mag;                 // 1 = mag holds a fresh reading
+    SpiPayloadMag mag;
+
     // ── Padding to reach 256 bytes ───────────────────────────────────────────
     uint8_t  pad[SPI_FRAME_SIZE
-                 - 2                    // magic
-                 - 1                    // has_cmd
-                 - 1                    // cmd_type
-                 - sizeof(PktSetPid)    // cmd (27 B)
-                 - 2                    // crc
-                 - 1                    // has_sbus
-                 - SBUS_SPI_CHANNELS * 2]; // sbus_raw (32 B)  → 190 bytes
+                 - 2                       // magic
+                 - 1                       // has_cmd
+                 - 1                       // cmd_type
+                 - sizeof(PktSetPid)       // cmd (27 B)
+                 - 2                       // crc
+                 - 1                       // has_sbus
+                 - SBUS_SPI_CHANNELS * 2   // sbus_raw (32 B)
+                 - 1                       // has_gps
+                 - sizeof(SpiPayloadGps)   // gps (30 B)
+                 - 1                       // has_mtf01
+                 - sizeof(SpiPayloadMtf01) // mtf01 (9 B)
+                 - 1                       // has_mag
+                 - sizeof(SpiPayloadMag)]; // mag (6 B)  → 142 bytes
 };
 static_assert(sizeof(SpiTxFrame) == SPI_FRAME_SIZE, "SpiTxFrame must be 256 bytes");
 

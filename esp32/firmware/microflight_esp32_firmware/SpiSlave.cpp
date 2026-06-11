@@ -97,6 +97,7 @@ bool SpiSlave::update()
 
     // Clear all freshness flags before parsing; only the new frame's type will be set
     m_newAttitude = m_newStatus = m_newPid = m_newCalib = m_newLog = m_newRadio = false;
+    m_newGps = m_newMtf01 = m_newMag = false;
 
     bool parsed = parseRxFrame(m_rxBuf);
 
@@ -225,6 +226,33 @@ bool SpiSlave::parseRxFrame(const uint8_t* buf)
             m_newRadio = true;
             break;
 
+        case SpiFrameType::Gps:
+            if (frame->header.payload_len < sizeof(SpiPayloadGps))
+            {
+                break;
+            }
+            memcpy(&m_gps, &frame->payload.gps, sizeof(m_gps));
+            m_newGps = true;
+            break;
+
+        case SpiFrameType::Mtf01:
+            if (frame->header.payload_len < sizeof(SpiPayloadMtf01))
+            {
+                break;
+            }
+            memcpy(&m_mtf01, &frame->payload.mtf01, sizeof(m_mtf01));
+            m_newMtf01 = true;
+            break;
+
+        case SpiFrameType::Mag:
+            if (frame->header.payload_len < sizeof(SpiPayloadMag))
+            {
+                break;
+            }
+            memcpy(&m_mag, &frame->payload.mag, sizeof(m_mag));
+            m_newMag = true;
+            break;
+
         default:
             return false;
     }
@@ -267,6 +295,27 @@ void SpiSlave::buildTxFrame()
     {
         memcpy(frame->sbus_raw, m_sbusRaw, sizeof(frame->sbus_raw));
     }
+
+    // ── GPS section ───────────────────────────────────────────────────────────
+    frame->has_gps = m_hasGps ? 1 : 0;
+    if (m_hasGps)
+    {
+        memcpy(&frame->gps, &m_gpsRaw, sizeof(frame->gps));
+    }
+
+    // ── MTF-01 section ────────────────────────────────────────────────────────
+    frame->has_mtf01 = m_hasMtf01 ? 1 : 0;
+    if (m_hasMtf01)
+    {
+        memcpy(&frame->mtf01, &m_mtf01Raw, sizeof(frame->mtf01));
+    }
+
+    // ── Magnetometer section ──────────────────────────────────────────────────
+    frame->has_mag = m_hasMag ? 1 : 0;
+    if (m_hasMag)
+    {
+        memcpy(&frame->mag, &m_magRaw, sizeof(frame->mag));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +326,28 @@ void SpiSlave::setSbusRaw(const uint16_t channels[SBUS_SPI_CHANNELS], bool valid
 {
     memcpy(m_sbusRaw, channels, SBUS_SPI_CHANNELS * sizeof(uint16_t));
     m_hasSbus = valid;
+}
+
+// ---------------------------------------------------------------------------
+// setGps / setMtf01 — store raw sensor readings to include in the next MISO frame
+// ---------------------------------------------------------------------------
+
+void SpiSlave::setGps(const SpiPayloadGps& gps)
+{
+    m_gpsRaw = gps;
+    m_hasGps = true;
+}
+
+void SpiSlave::setMtf01(const SpiPayloadMtf01& mtf01)
+{
+    m_mtf01Raw = mtf01;
+    m_hasMtf01 = true;
+}
+
+void SpiSlave::setMag(const SpiPayloadMag& mag)
+{
+    m_magRaw = mag;
+    m_hasMag = true;
 }
 
 // ---------------------------------------------------------------------------

@@ -115,11 +115,17 @@ See `common/Protocol.h` and `requirements/REQUIREMENTS.md` §4 for the full pack
 | SCL    | 22   |
 | SDA    | 21   |
 
-- Standard ESP32 I2C pins (Wire library default)
-- Supported IC: BMP280 / BMP388 / MS5611 (TBD — to be confirmed with hardware)
+- Standard ESP32 I2C pins (Wire library default), shared with the BN-880 compass
+- Fitted IC: **BMP180** (Bosch), fixed I2C address `0x77`
+- Driver: `Bmp180Reader` (`Bmp180Reader.h/.cpp`) — reads the 11 factory calibration
+  coefficients at start-up, then runs the datasheet fixed-point compensation to
+  produce true temperature and pressure
 - Fields: pressure (Pa), temperature (°C), altitude (m, computed from pressure using ISA formula)
-- Expected output rate: 10 Hz
+- Output rate: 5 Hz (blocking conversion ~9 ms, throttled in `loop()`)
 - Maps to `PKT_BARO (0x08)`
+- **Current path: direct ESP32 → GCS** (first debug pass). Unlike GPS / MTF-01 /
+  magnetometer it does not yet go through the FC over SPI; this is intentional
+  for bring-up and should later follow the same SPI round trip.
 
 ---
 
@@ -180,7 +186,7 @@ loop()
 ├── gps.update()           // drain GPS UART ring buffer, parse NMEA/UBX      [not yet impl.]
 ├── mtf01.update()         // drain MTF-01 UART ring buffer                   [not yet impl.]
 ├── sbus.update()          // drain S.Bus UART ring buffer, decode frame       [not yet impl.]
-├── baro.update()          // I2C poll if 100 ms elapsed (10 Hz)              [not yet impl.]
+├── g_baro.update()        // I2C poll at 5 Hz; sendBaro() direct to GCS (PKT_BARO)
 ├── udp_rx.update()        // receive pending GCS commands (non-blocking)     [not yet impl.]
 └── [1 Hz] sendStatus() + sendLog()   // heartbeat — always runs
 ```
@@ -193,7 +199,7 @@ loop()
 | `GpsReader`   | `gps_reader.h/.cpp` | ⬜ Planned | UART2 NMEA/UBX parser; exposes `GpsData` |
 | `Mtf01Reader` | `Mtf01Reader.h/.cpp`| ⬜ Planned | UART1 MAVLink v1 parser; exposes `Mtf01Data` |
 | `SbusReader`  | `sbus.h/.cpp`       | ⬜ Planned | UART0 inverted, S.Bus frame decoder; exposes `RadioData` |
-| `BaroReader`  | `baro.h/.cpp`       | ⬜ Planned | I2C poller (BMP280/388/MS5611); exposes `BaroData` |
+| `Bmp180Reader`| `Bmp180Reader.h/.cpp`| ✅ Implemented | BMP180 I2C poller (0x77); calibration + datasheet compensation; direct `PKT_BARO` send |
 | `UdpRx`       | *(in .ino)*         | ⬜ Planned | Non-blocking command receiver; calls `SpiSlave::setPendingCommand()` |
 
 ### 5.3 Packet Send Rates
@@ -207,7 +213,7 @@ loop()
 | `PKT_STATUS (0x05)`   | 10 Hz (FC) / 1 Hz (heartbeat) | FC via SPI / ESP32 internal | ✅ Heartbeat implemented |
 | `PKT_PID (0x06)`      | 1 Hz   | FC via SPI | ⬜ Planned |
 | `PKT_LOG (0x07)`      | On event / 1 Hz heartbeat | FC via SPI / ESP32 internal | ✅ Heartbeat implemented |
-| `PKT_BARO (0x08)`     | 10 Hz  | Barometer I2C | ⬜ Planned |
+| `PKT_BARO (0x08)`     | 5 Hz   | BMP180 I2C (direct, debug) | ✅ Implemented |
 | `PKT_CALIB_STATUS (0x09)` | On event | FC via SPI | ⬜ Planned |
 
 ### 5.4 Command Forwarding (GCS → FC)
@@ -402,7 +408,7 @@ WiFi credentials are stored in `Secrets.h` (not versioned — see §4.4). All ot
 | GCS IP | Subnet broadcast (automatic) | NVS |
 | GCS port | Hardcoded `5005` | NVS |
 | GPS baud rate | Hardcoded | NVS |
-| Barometer I2C address | Hardcoded `0x76` | NVS |
+| Barometer I2C address | Hardcoded `0x77` (BMP180) | NVS |
 
 ---
 
